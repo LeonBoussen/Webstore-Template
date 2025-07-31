@@ -1,0 +1,18 @@
+# Ignore environment and secrets
+.env
+*.env
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Dont forget to not leak your database XD
+shop.db
+
+# Logs and system files
+*.log
+
+# Virtual environments
+venv/
+env/
