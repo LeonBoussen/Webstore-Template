@@ -3,6 +3,7 @@ from flask_cors import CORS
 import sqlite3
 from datetime import datetime
 import colorama; colorama.init()
+import random
 
 
 #initialize Flask app, CORS and colorama
@@ -55,6 +56,28 @@ def get_all_products():
     rows = cursor.fetchall()
     conn.close()
     return [{"id": r[0], "name": r[1], "price": r[2]} for r in rows]
+
+@app.route('/api/catchphrase', methods=['GET'])
+def catchphrase():
+    log("Received request for catchphrase", "INFO")
+    list_of_upphrases = [
+        "Privacy is a right, not a privilege.",
+        "Your data, your rules.",
+        "Control your digital footprint.",
+        "Anonymity is freedom.",
+        "Secure your digital life."
+    ]
+    list_of_downphrases = [
+        "Easy and affordable",
+        "Secure phones for everyone.",
+        "Affordable privacy for all.",
+        "Affordable security, maximum privacy.",
+        "Cheaper and better than the rest."
+    ]
+    upph = random.choice(list_of_upphrases)
+    downph = random.choice(list_of_downphrases)
+    log(f"Generated catchphrase: {upph} | {downph}", "SUCCESS")
+    return jsonify({"upphrase": upph, "downphrase": downph})
 
 # api call route for function get_all_products
 @app.route('/api/products', methods=['GET'])

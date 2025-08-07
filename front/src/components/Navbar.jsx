@@ -10,11 +10,7 @@ const links = [
 const Navbar = () => (
   <nav className="fixed top-0 left-0 w-full flex justify-center gap-8 py-4 bg-black/40 backdrop-blur-sm text-white shadow-md z-50">
     {links.map(({ label, path }) => (
-      <Link
-        key={label}
-        to={path}
-        className="hover:text-cyan-300 hover:drop-shadow-[0_0_20px_cyan] transition"
-      >
+      <Link key={label} to={path} className="hover:text-cyan-300 hover:drop-shadow-[0_0_20px_cyan] transition">
         {label}
       </Link>
     ))}
