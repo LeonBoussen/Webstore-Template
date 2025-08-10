@@ -8,7 +8,8 @@ export default defineConfig({
     react(),
     tailwindcss()
   ],
+  base: '/subfolder/ecom-dev',
   server: {
-    allowedHosts: ['idhere.ngrok-free.app', 'localhost']
+    allowedHosts: ['372c99871fbf.ngrok-free.app', 'localhost']
   }  
 })
