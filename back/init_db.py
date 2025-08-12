@@ -76,11 +76,11 @@ def create_or_update_db_table():
     add_columns = [
         ('products', 'limited_edition', 'INTEGER DEFAULT 0'),
         ('products', 'sold_out', 'INTEGER DEFAULT 0'),
+        ('products', 'almost_sold_out', 'INTEGER DEFAULT 0'),
         ('products', 'discount_price', 'REAL'),
         ('products', 'bio', 'TEXT'),
         ('products', 'image_path', 'TEXT'),
         ('users', 'preferred_payment', 'TEXT'),
-        # For services (if table existed without some columns):
         ('services', 'discount_price', 'REAL'),
         ('services', 'bio', 'TEXT'),
         ('services', 'image_path', 'TEXT'),

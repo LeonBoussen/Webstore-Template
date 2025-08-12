@@ -31,7 +31,7 @@ const Home = () => {
   }, []);
 
   return (
-    <div className="bg-neutral-950 text-white">
+    <div className="flex flex-col bg-neutral-950 text-white">
       {/* KEEP: gradient pulse for the hero headline */}
       <style>
         {`
@@ -49,14 +49,8 @@ const Home = () => {
         `}
       </style>
 
-      {/* HERO (unchanged layout) */}
-      <div
-          className="relative h-screen w-full flex items-center justify-center bg-cover bg-center"
-          style={{
-          marginTop: -65,
-          backgroundImage: `url('https://images.unsplash.com/photo-1729575846511-f499d2e17d79?q=80&w=1632&auto=format&fit=crop')`
-        }}
-      >
+      {/* HERO (unchanged layout) https://images.unsplash.com/photo-1729575846511-f499d2e17d79?q=80&w=1632&auto=format&fit=crop*/}
+      <div className="relative min-h-screen w-full flex items-center justify-center bg-cover bg-center mt-0 bg-[url('https://images.unsplash.com/photo-1729575846511-f499d2e17d79?q=80&w=1632&auto=format&fit=crop')]">
         <div className="absolute inset-0 bg-black/60" />
         <div
           className={`relative z-10 text-center px-6 transition-opacity duration-1000 ease-in-out ${

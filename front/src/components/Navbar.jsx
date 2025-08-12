@@ -12,6 +12,8 @@ const links = [
 export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
   const [username] = useState('');
+  const [loaded, setLoaded] = useState(false);
+
   const [scrolled, setScrolled] = useState(false);
 
   const navigate = useNavigate();
@@ -27,6 +29,7 @@ export default function Navbar() {
     const onScroll = () => setScrolled(window.scrollY > 10);
     onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
+    setLoaded(true);
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
@@ -57,7 +60,8 @@ export default function Navbar() {
 
   return (
     <nav
-      className={`fixed top-0 inset-x-0 z-50 transition-colors duration-300 ${shellClasses}`}
+      className={`fixed top-0 inset-x-0 z-50 transition-colors duration-300 ${shellClasses} transition-opacity  duration-1000 ease-in-out`
+    }
       role="navigation"
       aria-label="Primary"
     >

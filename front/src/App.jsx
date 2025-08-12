@@ -13,24 +13,22 @@ import Admin from './pages/Admin';
 function App() {
   return (
     <Router>
-      <Navbar />
-      {/* Offset for fixed navbar */}
-      <div className="pt-16">
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/products" element={<Products />} />
-          <Route path="/about" element={<About />} />
-          <Route path="/contact" element={<Contact />} />
-          <Route path="/addproduct" element={<AddProduct />} />
-          {/* NEW routes */}
-          <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
-          <Route path="/admin" element={<Admin />} />
+        <Navbar />
+          {/* Offset for fixed navbar */}
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/products" element={<Products />} />
+              <Route path="/about" element={<About />} />
+              <Route path="/contact" element={<Contact />} />
+              <Route path="/addproduct" element={<AddProduct />} />
+              {/* NEW routes */}
+              <Route path="/login" element={<Login />} />
+              <Route path="/signup" element={<Signup />} />
+              <Route path="/admin" element={<Admin />} />
 
-          <Route path="*" element={<div className="p-6">Page Not Found Bozo :(</div>} />
-        </Routes>
-      </div>
-      {/* Removed the global white filler div */}
+              <Route path="*" element={<div className="p-6">Page Not Found Bozo :(</div>} />
+            </Routes>
+          {/* Removed the global white filler div */}
     </Router>
   );
 }

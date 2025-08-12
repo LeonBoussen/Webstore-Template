@@ -12,7 +12,7 @@ export default function Signup() {
     e.preventDefault();
     setMsg('');
     try {
-      const { data } = await axios.post('/api/auth/signup', { email, username, password });
+      const { data } = await axios.post('http://127.0.0.1:5000/api/auth/signup', { email, username, password });
       localStorage.setItem('userToken', data.token);
       setMsg('✅ Account created! You are now logged in.');
     } catch (e) {
@@ -21,11 +21,7 @@ export default function Signup() {
   };
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-white"
-    style={{
-      marginTop: -65,
-      }}
-    >
+    <div className="min-h-screen bg-neutral-950 text-white">
       {/* subtle background treatment like Home */}
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(60%_40%_at_50%_10%,rgba(34,197,94,0.08),transparent_60%)]" />
       <div className="max-w-7xl mx-auto px-6 pt-28 pb-16">

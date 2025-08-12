@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, session, redirect, url_for, Response
 from flask_cors import CORS
 import sqlite3
 from datetime import datetime
@@ -7,6 +7,9 @@ import random
 import os, hashlib, hmac, base64, json, time
 from functools import wraps
 from werkzeug.utils import secure_filename
+from dotenv import load_dotenv
+
+load_dotenv()  # Load environment variables from .env file
 
 # Optional Pillow for EXIF strip/resize
 try:
