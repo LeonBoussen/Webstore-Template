@@ -16,3 +16,4 @@ shop.db
 # Virtual environments
 venv/
 env/
+front/vite.config.js

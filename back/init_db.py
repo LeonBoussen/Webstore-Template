@@ -1,18 +1,13 @@
 import os
 import sqlite3
 
-# Database name as constant to ensure consistency
 DATABASE = 'shop.db'
 
-# Function to check if a column exists in a table
 def column_exists(cursor, table_name, column_name):
     cursor.execute(f"PRAGMA table_info({table_name})")
-    columns = [row[1] for row in cursor.fetchall()]
-    return column_name in columns
+    return column_name in [row[1] for row in cursor.fetchall()]
 
-# Function to create or update the database tables
 def create_or_update_db_table():
-    # make connection with database
     conn = sqlite3.connect(DATABASE)
     cursor = conn.cursor()
 
@@ -30,6 +25,19 @@ def create_or_update_db_table():
         )
     ''')
 
+    # NEW: services table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS services (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            bio TEXT,
+            price REAL NOT NULL,
+            discount_price REAL,
+            image_path TEXT,
+            active INTEGER DEFAULT 1
+        )
+    ''')
+
     # users table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
@@ -44,7 +52,7 @@ def create_or_update_db_table():
         )
     ''')
 
-    # order table
+    # orders + order_items (unchanged)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS orders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,8 +62,6 @@ def create_or_update_db_table():
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     ''')
-
-    # order_items table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS order_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,18 +72,22 @@ def create_or_update_db_table():
         )
     ''')
 
-    # Check and add new columns if they do not exist
+    # Backfill missing columns (keeps your previous approach)
     add_columns = [
-        # (table, column, definition)
         ('products', 'limited_edition', 'INTEGER DEFAULT 0'),
         ('products', 'sold_out', 'INTEGER DEFAULT 0'),
+        ('products', 'almost_sold_out', 'INTEGER DEFAULT 0'),
         ('products', 'discount_price', 'REAL'),
         ('products', 'bio', 'TEXT'),
         ('products', 'image_path', 'TEXT'),
-        ('users', 'preferred_payment', 'TEXT')
+        ('users', 'preferred_payment', 'TEXT'),
+        ('services', 'discount_price', 'REAL'),
+        ('services', 'bio', 'TEXT'),
+        ('services', 'image_path', 'TEXT'),
+        ('services', 'active', 'INTEGER DEFAULT 1'),
     ]
     for table, column, definition in add_columns:
-        if not column_exists(cursor, table, column):
+        if table in ('products', 'users', 'services') and not column_exists(cursor, table, column):
             print(f"Adding column {column} to table {table}")
             cursor.execute(f'ALTER TABLE {table} ADD COLUMN {column} {definition}')
 
@@ -87,12 +97,12 @@ def create_or_update_db_table():
 if __name__ == '__main__':
     try:
         create_or_update_db_table()
-        input("Database initialized successfully.\nPress Enter to exit...")
+        input("Database initialized/updated.\nPress Enter to exit...")
     except sqlite3.Error as e:
-        print(f"An sql error!: {e}")
+        print(f"SQL error: {e}")
         input("Press Enter to exit...")
     except Exception as e:
-        print(f"An error occurred: {e}")
+        print(f"Error: {e}")
         input("Press Enter to exit...")
     finally:
         exit(0)
