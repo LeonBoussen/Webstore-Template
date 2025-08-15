@@ -9,26 +9,25 @@ import AddProduct from './pages/AddProduct';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import Admin from './pages/Admin';
+import Account from './pages/Account'
 
 function App() {
   return (
     <Router>
         <Navbar />
-          {/* Offset for fixed navbar */}
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/products" element={<Products />} />
-              <Route path="/about" element={<About />} />
-              <Route path="/contact" element={<Contact />} />
-              <Route path="/addproduct" element={<AddProduct />} />
-              {/* NEW routes */}
-              <Route path="/login" element={<Login />} />
-              <Route path="/signup" element={<Signup />} />
-              <Route path="/admin" element={<Admin />} />
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/products" element={<Products />} />
+            <Route path="/about" element={<About />} />
+            <Route path="/contact" element={<Contact />} />
+            <Route path="/addproduct" element={<AddProduct />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<Signup />} />
+            <Route path="/admin" element={<Admin />} />
+            <Route path="/account" element={<Account />} />
 
-              <Route path="*" element={<div className="p-6">Page Not Found Bozo :(</div>} />
-            </Routes>
-          {/* Removed the global white filler div */}
+            <Route path="*" element={<div className="p-6">This page is not here, contact the developer!</div>} />
+          </Routes>
     </Router>
   );
 }

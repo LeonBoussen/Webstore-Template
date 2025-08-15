@@ -6,14 +6,13 @@ const Home = () => {
   const [downPhrase, setDownPhrase] = useState('');
   const [loaded, setLoaded] = useState(false);
 
-  // NEW: simple showcase items (replace with your real products/services or API data)
   const topItems = [
-    { title: 'Starter Bundle', desc: 'Perfect for getting going fast with our essentials.', href: '/products' , badge: 'Popular' },
-    { title: 'Pro Service', desc: 'Priority support and extended features for teams.', href: '/products', badge: 'Bestseller' },
-    { title: 'Custom Build', desc: 'Tailored solutions for unique requirements.', href: '/products' },
-    { title: 'Maintenance', desc: 'Performance tuning and long-term reliability.', href: '/services' },
-    { title: 'Security Review', desc: 'Hardening, audits, and best-practice guidance.', href: '/services' },
-    { title: 'Consulting', desc: 'From roadmap to rollout with expert help.', href: '/contact' }
+    { title: 'Websites', desc: 'Professional websites customized to your liking!', href: '/products' , badge: 'Popular' },
+    { title: 'Hosting', desc: 'Website or server hosting, secure and anonymous.', href: '/products', badge: 'Bestseller' },
+    { title: 'Software', desc: 'Custom build software tailored to your needs.', href: '/products' },
+    { title: 'Maintenance', desc: 'All ways customer support to help you out!', href: '/services' },
+    { title: 'Security Consulting', desc: 'Consulting for online security.', href: '/services' },
+    { title: 'Private programming lessons', desc: 'Private programming lessons from a software developer.', href: '/contact' }
   ];
 
   useEffect(() => {
@@ -32,7 +31,6 @@ const Home = () => {
 
   return (
     <div className="flex flex-col bg-neutral-950 text-white">
-      {/* KEEP: gradient pulse for the hero headline */}
       <style>
         {`
           @keyframes gradientPulse {
@@ -48,8 +46,6 @@ const Home = () => {
           }
         `}
       </style>
-
-      {/* HERO (unchanged layout) https://images.unsplash.com/photo-1729575846511-f499d2e17d79?q=80&w=1632&auto=format&fit=crop*/}
       <div className="relative min-h-screen w-full flex items-center justify-center bg-cover bg-center mt-0 bg-[url('https://images.unsplash.com/photo-1729575846511-f499d2e17d79?q=80&w=1632&auto=format&fit=crop')]">
         <div className="absolute inset-0 bg-black/60" />
         <div
@@ -61,8 +57,6 @@ const Home = () => {
             <p>{upPhrase}</p>
             <p>{downPhrase}</p>
           </div>
-
-          {/* CHANGED: buttons now scroll to sections on this page */}
           <div className="flex flex-wrap gap-4 justify-center mt-6">
             <a
               href="#top-products"
@@ -79,16 +73,13 @@ const Home = () => {
           </div>
         </div>
       </div>
-
-      {/* NEW: Top Products / Services */}
-      <section
-        id="top-products"
-        className="relative w-full py-16 md:py-20 bg-gradient-to-b from-neutral-950 via-neutral-900 to-neutral-950"
-      >
+      <section id="top-products" className="relative w-full py-16 md:py-20 bg-gradient-to-b from-neutral-950 via-neutral-900 to-neutral-950">
         <div className="mx-auto max-w-6xl px-6">
           <div className="flex items-end justify-between gap-4 mb-8">
             <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">
-              Top Products <span className="text-neutral-400">/</span> Services
+              Top Products
+              <span className="text-sky-400 animate-pulse drop-shadow-[0_0_10px_rgba(56,189,248,0.9)]"> / </span>
+              Services
             </h2>
             <a
               href="/products"
@@ -97,7 +88,6 @@ const Home = () => {
               View all →
             </a>
           </div>
-
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {topItems.map((item, i) => (
               <div
@@ -131,8 +121,6 @@ const Home = () => {
           </div>
         </div>
       </section>
-
-      {/* NEW: About / Who we are */}
       <section id="about" className="w-full py-16 md:py-20">
         <div className="mx-auto max-w-6xl px-6 grid md:grid-cols-2 gap-10 items-start">
           <div>
@@ -168,12 +156,10 @@ const Home = () => {
           </div>
         </div>
       </section>
-
-      {/* NEW: Footer */}
       <footer className="mt-8 border-t border-white/10 bg-neutral-950">
         <div className="mx-auto max-w-6xl px-6 py-8 flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="text-sm text-neutral-400">
-            © {new Date().getFullYear()} YourBrand. All rights reserved.{' '}
+            © {new Date().getFullYear()} LeonBoussen All rights reserved.{' '}
             <span className="mx-2">•</span>
             <a href="/legal" className="hover:text-white">Legal</a>
             <span className="mx-2">•</span>
@@ -183,10 +169,10 @@ const Home = () => {
             <a href="https://x.com/yourbrand" aria-label="X" className="hover:text-white">
               <svg width="20" height="20" viewBox="0 0 24 24"><path fill="currentColor" d="M4 4l7.5 8.5L4 20h3l6-6.7L19.5 20H22l-7.7-8.5L22 4h-3L13 10.6L7.5 4z"/></svg>
             </a>
-            <a href="https://instagram.com/yourbrand" aria-label="Instagram" className="hover:text-white">
+            <a href="https://instagram.com/LeonBoussen" aria-label="Instagram" className="hover:text-white">
               <svg width="20" height="20" viewBox="0 0 24 24"><path fill="currentColor" d="M7 2h10a5 5 0 0 1 5 5v10a5 5 0 0 1-5 5H7a5 5 0 0 1-5-5V7a5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3V7a3 3 0 0 0-3-3H7m5 3.8A5.2 5.2 0 1 1 6.8 13 5.2 5.2 0 0 1 12 7.8m0 2A3.2 3.2 0 1 0 15.2 13 3.2 3.2 0 0 0 12 9.8M17.5 6a1 1 0 1 1-1 1a1 1 0 0 1 1-1Z"/></svg>
             </a>
-            <a href="https://github.com/yourbrand" aria-label="GitHub" className="hover:text-white">
+            <a href="https://github.com/LeonBoussen" aria-label="GitHub" className="hover:text-white">
               <svg width="20" height="20" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.8c-2.9.6-3.5-1.4-3.5-1.4c-.5-1.2-1.2-1.6-1.2-1.6c-1-.7.1-.7.1-.7c1.1.1 1.7 1.2 1.7 1.2c1 .1.8-.8.8-.8c-.9-.1-1.8-.5-2.2-1.1c-.2-.5-.6-1.6.1-2.2c0 0 .8-.1 2 .8c.7-.2 1.5-.3 2.3-.3s1.6.1 2.3.3c1.2-.9 2-.8 2-.8c.7.6.3 1.7.1 2.2c-.4.6-1.3 1-2.2 1.1c0 0-.2.9.8.8c0 0 .6-1.1 1.7-1.2c0 0 1.1 0 .1.7c0 0-.7.4-1.2 1.6c0 0-.6 2.1-3.5 1.4v1.8c0 .3.2.6.7.5A10 10 0 0 0 12 2Z"/></svg>
             </a>
             <a href="https://linkedin.com/company/yourbrand" aria-label="LinkedIn" className="hover:text-white">

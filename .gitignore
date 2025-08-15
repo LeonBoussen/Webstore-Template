@@ -17,3 +17,8 @@ shop.db
 venv/
 env/
 front/vite.config.js
+
+# Uploaded files like images for test database
+uploads/
+
+front/vite.config.js
