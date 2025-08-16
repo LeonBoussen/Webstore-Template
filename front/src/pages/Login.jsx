@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import axios from 'axios';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate  } from 'react-router-dom';
 
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPass] = useState('');
   const [msg, setMsg] = useState('');
+  const navigate = useNavigate();
 
   const submit = async (e) => {
     e.preventDefault();
@@ -14,6 +15,7 @@ export default function Login() {
       const { data } = await axios.post('http://127.0.0.1:5000/api/auth/login', { email, password });
       localStorage.setItem('userToken', data.token);
       setMsg('✅ Logged in!');
+      navigate('/products');
     } catch (e) {
       setMsg(e?.response?.data?.error || 'Error');
     }

@@ -134,7 +134,8 @@ def row_to_product(r):
     return {
         "id": r[0], "name": r[1], "bio": r[2],
         "price": r[3], "discount_price": r[4],
-        "image_url": r[5], "limited_edition": r[6], "sold_out": r[7]
+        "image_url": f"{r[5]}" if r[5] else None, 
+        "limited_edition": r[6], "sold_out": r[7]
     }
 
 
@@ -142,7 +143,8 @@ def row_to_service(r):
     return {
         "id": r[0], "name": r[1], "bio": r[2],
         "price": r[3], "discount_price": r[4],
-        "image_url": r[5], "active": r[6]
+        "image_url": f"{r[5]}" if r[5] else None,
+        "active": r[6]
     }
 
 
@@ -182,18 +184,18 @@ def verify_password(password: str, stored_hash_b64: str, salt_b64: str) -> bool:
 def catchphrase():
     log("Received request for catchphrase", "INFO")
     list_of_upphrases = [
-        "Privacy is a right, not a privilege.",
-        "Your data, your rules.",
-        "Control your digital footprint.",
-        "Anonymity is freedom.",
-        "Secure your digital life."
+        "Privacy is a right, not a privilege",
+        "Your data, your rules",
+        "Control your digital footprint",
+        "Anonymity is freedom",
+        "Secure your digital life"
     ]
     list_of_downphrases = [
         "Easy and affordable",
-        "Secure phones for everyone.",
-        "Affordable privacy for all.",
-        "Affordable security, maximum privacy.",
-        "Cheaper and better than the rest."
+        "Secure phones for everyone",
+        "Affordable privacy for all",
+        "Affordable security, maximum privacy",
+        "Cheaper and better than the rest"
     ]
     upph = random.choice(list_of_upphrases)
     downph = random.choice(list_of_downphrases)
@@ -510,7 +512,7 @@ if __name__ == '__main__':
     log("server.py has been launched!", "INFO")
     try:
         log("Starting Flask server...", "SUCCESS")
-        app.run(port=5000)
+        app.run(host="127.0.0.1", port=5000)
     except KeyboardInterrupt:
         log("Server shutdown initiated by user keyboard interruption", "WARNING")
         exit(0)

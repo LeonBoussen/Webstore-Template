@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Plus, Minus, Trash2, ShoppingCart, X } from "lucide-react";
+import { Link } from "react-router-dom";
 
 const API_BASE = "http://127.0.0.1:5000";
 const fmt = new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" });
@@ -8,7 +9,14 @@ const percentOff = (price, discount) =>
   discount && discount < price ? Math.round(100 - (discount / price) * 100) : 0;
 const isUrl = (s) => typeof s === "string" && /^https?:\/\//i.test(s);
 const withBase = (u) => (!u ? null : isUrl(u) ? u : `${API_BASE}${u.startsWith("/") ? "" : "/"}${u}`);
-const resolveImage = (item) => withBase(item?.image_url) || (isUrl(item?.bio) ? item.bio : null);
+const firstImageOf = (item) => {
+  const raw =
+    item?.image1 ??                         // only use first image of product as front image
+    item?.image_url ?? item?.image_path ??  //
+    (Array.isArray(item?.image_urls) ? item.image_urls[0] : undefined) ??
+    (Array.isArray(item?.gallery) ? item.gallery[0] : undefined);
+  return withBase(raw || null);
+};
 
 function useLocalCart() {
   const read = () => {
@@ -104,7 +112,7 @@ const Price = ({ price, discount }) => {
 
 const Card = ({ item, kind, onAdd }) => {
   const { name, bio, price, discount_price, limited_edition, sold_out } = item;
-  const img = resolveImage(item);
+  const img = firstImageOf(item);
   const badges = [
     limited_edition ? { text: "Limited", tone: "amber" } : null,
     sold_out ? { text: "Sold out", tone: "rose" } : null,
@@ -112,10 +120,16 @@ const Card = ({ item, kind, onAdd }) => {
 
   return (
     <div className="group relative flex flex-col rounded-xl border border-white/5 bg-neutral-900/60 p-3 shadow-[0_1px_0_0_rgba(255,255,255,0.06)_inset] ring-1 ring-black/40 backdrop-blur transition hover:border-white/10 hover:bg-neutral-900">
-      <ImageBox src={img} alt={name} />
+      <Link to={`/product/${item.id}`} state={{ product: item }} aria-label={`Open ${name}`}>
+        <ImageBox src={img} alt={name} />
+      </Link>
       <div className="mt-3 flex flex-col gap-2">
         <div className="flex items-start justify-between gap-2">
-          <h3 className="text-base font-semibold leading-tight text-white">{name}</h3>
+          <h3 className="text-base font-semibold leading-tight text-white">
+            <Link to={`/product/${item.id}`} state={{ product: item }} className="hover:text-cyan-300">
+              {name}
+            </Link>
+          </h3>
           <div className="flex shrink-0 gap-1">
             {badges.map((b, i) => (
               <Ribbon key={i} tone={b.tone}>{b.text}</Ribbon>
@@ -162,7 +176,7 @@ const CartDrawer = ({ open, onClose, items, inc, dec, remove, total }) => (
           <p className="text-neutral-400">Your cart is empty.</p>
         ) : items.map((it) => {
           const priceEach = (it.discount_price ?? it.price) || 0;
-          const img = withBase(it.image_url);
+          const img = firstImageOf(it);
           return (
             <div key={`${it.kind}-${it.id}`} className="flex gap-3 rounded-lg border border-white/10 p-3 bg-neutral-900/60">
               <div className="h-16 w-20 overflow-hidden rounded bg-neutral-800">
@@ -289,7 +303,7 @@ export default function Products() {
   return (
     // IMPORTANT: pt-16 keeps page content under nav bar but its hard coded so should be fixed later :p
     <div className="bg-neutral-950 text-white min-h-screen pt-16">
-      <div className="sticky top-16 z-40 bg-neutral-950/70 border-b border-white/10 backdrop-blur">
+      <div className="top-16 z-40 bg-neutral-950/70 border-b border-white/10 backdrop-blur">
         <header className="mx-auto w-full max-w-7xl px-4 py-4">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
