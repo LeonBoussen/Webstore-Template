@@ -46,18 +46,23 @@ export default function Navbar() {
     return () => el.classList.remove(cls);
   }, [isOpen]);
 
-  const shellClasses =
-    isHome && !scrolled
-      ? 'bg-transparent border-transparent'
-      : 'bg-neutral-900/70 supports-[backdrop-filter]:bg-neutral-900/40 backdrop-blur-md border-b border-white/10 shadow-lg';
-
-  return (
-    <nav
-      className={`fixed top-0 inset-x-0 z-50 transition-colors duration-300 ${shellClasses} transition-opacity  duration-1000 ease-in-out`
+  const shellClasses = `
+    border-b border-white/10 shadow-lg 
+    transition-all duration-500 ease-in-out
+    ${isHome && !scrolled 
+      ? 'bg-transparent opacity-100' 
+      : 'bg-neutral-900/70 supports-[backdrop-filter]:bg-neutral-900/40 backdrop-blur-md opacity-100'
     }
-      role="navigation"
-      aria-label="Primary"
-    >
+  `;
+  return (
+      <nav
+        className={`fixed top-0 inset-x-0 z-50 ${shellClasses}`}
+        style={{
+          transition: 'background-color 0.5s ease, backdrop-filter 0.5s ease, opacity 0.5s ease'
+        }}
+        role="navigation"
+        aria-label="Primary"
+      >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex h-16 items-center justify-between text-white">
           <Link to="/" className="text-2xl font-bold tracking-wide text-cyan-500 hover:text-cyan-300 transition">
@@ -119,13 +124,22 @@ export default function Navbar() {
         id="mobile-menu"
         className={`md:hidden fixed top-16 inset-x-0 transform transition-all duration-200 ${
           isOpen ? 'opacity-100 translate-y-0' : 'pointer-events-none opacity-0 -translate-y-2'
-        }`}>
-        <div className="bg-neutral-950/50 backdrop-blur-md border-t border-white/10 shadow-2xl px-4 pt-2 pb-4 space-y-2">
+        }`}
+      >
+        <div
+          className="
+            bg-[#0a1a1a]  /* Solid dark green/blue tone */
+            border-t border-white/10 
+            shadow-2xl 
+            px-4 pt-2 pb-4 space-y-2
+          "
+        >
           {links.map(({ label, path }) => (
             <Link
               key={label}
               to={path}
-              className="block py-2 px-3 rounded-lg hover:bg-cyan-500/10 hover:text-cyan-300 transition">
+              className="block py-2 px-3 rounded-lg text-white hover:bg-cyan-500/20 hover:text-cyan-300 transition"
+            >
               {label}
             </Link>
           ))}
@@ -133,7 +147,8 @@ export default function Navbar() {
           {isAdmin && (
             <Link
               to="/admin"
-              className="block py-2 px-3 rounded-lg bg-cyan-600/90 hover:bg-cyan-600 transition">
+              className="block py-2 px-3 rounded-lg bg-cyan-600 text-white hover:bg-cyan-500 transition"
+            >
               <span className="inline-flex items-center gap-2">
                 <Shield size={18} /> Admin
               </span>
@@ -143,7 +158,8 @@ export default function Navbar() {
           {!isLoggedIn ? (
             <Link
               to="/login"
-              className="block py-2 px-3 rounded-lg border border-white/15 hover:bg-white hover:text-white transition">
+              className="block py-2 px-3 rounded-lg border border-white/15 text-white hover:bg-white hover:text-black transition"
+            >
               <span className="inline-flex items-center gap-2">
                 <LogIn size={18} /> Login
               </span>
@@ -151,10 +167,9 @@ export default function Navbar() {
           ) : (
             <button
               to="/account"
-              className="w-full text-left py-2 px-3 rounded-lg bg-neutral-800 hover:bg-neutral-700 transition">
-              <span className="inline-flex items-center gap-2">
-                Account
-              </span>
+              className="w-full text-left py-2 px-3 rounded-lg bg-neutral-800 text-white hover:bg-neutral-700 transition"
+            >
+              <span className="inline-flex items-center gap-2">Account</span>
             </button>
           )}
         </div>

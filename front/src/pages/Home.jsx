@@ -54,8 +54,8 @@ const Home = () => {
           }`}
         >
           <div className="text-4xl md:text-6xl font-bold text-transparent bg-gradient-to-r from-green-400 via-emerald-300 to-cyan-400 bg-clip-text animate-gradient-pulse drop-shadow-lg mb-6">
-            <p>{upPhrase}</p>
-            <p>{downPhrase}</p>
+            <p className='leading-[1.25]'>{upPhrase}</p>
+            <p className='leading-[1.25]'>{downPhrase}</p>
           </div>
           <div className="flex flex-wrap gap-4 justify-center mt-6">
             <a
