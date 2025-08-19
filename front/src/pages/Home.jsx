@@ -10,8 +10,8 @@ const Home = () => {
     { title: 'Websites', desc: 'Professional websites customized to your liking!', href: '/products' , badge: 'Popular' },
     { title: 'Hosting', desc: 'Website or server hosting, secure and anonymous.', href: '/products', badge: 'Bestseller' },
     { title: 'Software', desc: 'Custom build software tailored to your needs.', href: '/products' },
-    { title: 'Maintenance', desc: 'All ways customer support to help you out!', href: '/services' },
-    { title: 'Security Consulting', desc: 'Consulting for online security.', href: '/services' },
+    { title: 'Maintenance', desc: 'All ways customer support to help you out!', href: '/products' },
+    { title: 'Security Consulting', desc: 'Consulting for online security.', href: '/products' },
     { title: 'Private programming lessons', desc: 'Private programming lessons from a software developer.', href: '/contact' }
   ];
 
@@ -90,9 +90,11 @@ const Home = () => {
           </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {topItems.map((item, i) => (
-              <div
+              <a
                 key={i}
-                className="group relative rounded-2xl bg-neutral-900/60 border border-white/10 p-5 hover:border-cyan-500/40 transition"
+                href={item.href}
+                className="group relative rounded-2xl bg-neutral-900/60 border border-white/10 p-5 hover:border-cyan-500/40 transition block"
+                aria-label={`Open ${item.title}`}
               >
                 <div className="flex items-start justify-between gap-3">
                   <h3 className="text-lg font-semibold">{item.title}</h3>
@@ -105,18 +107,14 @@ const Home = () => {
                 <p className="mt-2 text-sm text-neutral-300">
                   {item.desc}
                 </p>
-                <a
-                  href={item.href}
-                  className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-cyan-300 hover:text-white"
-                  aria-label={`Open ${item.title}`}
-                >
+                <span className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-cyan-300 group-hover:text-white">
                   View details
                   <svg width="16" height="16" viewBox="0 0 24 24" className="inline">
                     <path fill="currentColor" d="M13 5l7 7-7 7v-4H4v-6h9V5z" />
                   </svg>
-                </a>
+                </span>
                 <div className="pointer-events-none absolute inset-0 rounded-2xl ring-0 ring-cyan-400/0 group-hover:ring-2 group-hover:ring-cyan-400/30 transition" />
-              </div>
+              </a>
             ))}
           </div>
         </div>
@@ -135,7 +133,6 @@ const Home = () => {
               simple: <span className="text-white">make it work beautifully</span>—and keep it secure.
             </p>
           </div>
-
           <div className="grid gap-4">
             {[
               'Privacy-first by default',
