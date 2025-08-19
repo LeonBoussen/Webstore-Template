@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Minus, Trash2, ShoppingCart, X } from "lucide-react";
 import { Link } from "react-router-dom";
 
@@ -11,8 +11,8 @@ const isUrl = (s) => typeof s === "string" && /^https?:\/\//i.test(s);
 const withBase = (u) => (!u ? null : isUrl(u) ? u : `${API_BASE}${u.startsWith("/") ? "" : "/"}${u}`);
 const firstImageOf = (item) => {
   const raw =
-    item?.image1 ??                         // only use first image of product as front image
-    item?.image_url ?? item?.image_path ??  //
+    item?.image1 ??
+    item?.image_url ?? item?.image_path ??
     (Array.isArray(item?.image_urls) ? item.image_urls[0] : undefined) ??
     (Array.isArray(item?.gallery) ? item.gallery[0] : undefined);
   return withBase(raw || null);
@@ -35,7 +35,11 @@ function useLocalCart() {
     const arr = [...items];
     const i = arr.findIndex((c) => c.id === item.id && c.kind === item.kind);
     if (i >= 0) arr[i] = { ...arr[i], qty: (arr[i].qty || 1) + 1 };
-    else arr.push({ id: item.id, kind: item.kind, name: item.name, price: item.price, discount_price: item.discount_price, image_url: item.image_url, qty: 1 });
+    else arr.push({
+      id: item.id, kind: item.kind, name: item.name,
+      price: item.price, discount_price: item.discount_price,
+      image_url: item.image_url ?? firstImageOf(item), qty: 1
+    });
     save(arr);
   };
 
@@ -58,7 +62,6 @@ function useLocalCart() {
   return { items, add, inc, dec, remove, clear, count, total };
 }
 
-// --- UI bits ---
 const Ribbon = ({ children, tone = "indigo" }) => (
   <span
     className={cls(
@@ -140,7 +143,7 @@ const Card = ({ item, kind, onAdd }) => {
         <div className="mt-2 flex items-center justify-between gap-3">
           <Price price={price} discount={discount_price} />
           <button
-            onClick={() => onAdd({ ...item, kind })}
+            onClick={(e) => onAdd({ ...item, kind }, e.currentTarget)}
             disabled={!!sold_out}
             className={cls(
               "rounded-lg px-3 py-2 text-sm font-semibold transition",
@@ -216,10 +219,98 @@ const CartDrawer = ({ open, onClose, items, inc, dec, remove, total }) => (
   </>
 );
 
+function Toast({ show, children }) {
+  return (
+    <div className={cls(
+      "fixed right-4 bottom-4 z-[60] transition-all duration-300",
+      show ? "opacity-100 translate-y-0" : "pointer-events-none opacity-0 translate-y-2"
+    )}>
+      <div className="rounded-lg border border-white/10 bg-neutral-900/90 px-4 py-2 text-sm text-white shadow-lg backdrop-blur">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function FirstAddModal({ show, onClose, onGoToCart }) {
+  return (
+    <div
+      className={cls(
+        "fixed inset-0 z-[70] transition",
+        show ? "opacity-100" : "pointer-events-none opacity-0"
+      )}
+      aria-hidden={!show}
+    >
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="absolute inset-0 flex items-center justify-center p-4">
+        <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-neutral-950 text-white shadow-2xl">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+            <h3 className="text-base font-semibold">Added to your cart</h3>
+            <button onClick={onClose} className="rounded-full p-2 bg-neutral-800 hover:bg-neutral-700">
+              <X size={16} />
+            </button>
+          </div>
+          <div className="px-4 py-4 text-sm text-neutral-300">
+            Nice! Your item is in the cart. You can keep shopping or go to the cart to review and checkout.
+          </div>
+          <div className="flex items-center gap-2 px-4 pb-4">
+            <button
+              onClick={onGoToCart}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-white px-3 py-2 text-sm font-semibold text-neutral-900 hover:bg-neutral-200"
+            >
+              <ShoppingCart size={16}/> View cart
+            </button>
+            <button
+              onClick={onClose}
+              className="rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-sm text-white hover:bg-neutral-800"
+            >
+              Keep shopping
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Add to card animation*/
+function flyToCart(startEl, endEl, imgSrc) {
+  if (!startEl || !endEl) return;
+  const s = startEl.getBoundingClientRect();
+  const e = endEl.getBoundingClientRect();
+
+  const flyer = document.createElement("img");
+  flyer.src = imgSrc || "";
+  flyer.alt = "";
+  flyer.style.position = "fixed";
+  flyer.style.left = `${s.left + s.width / 2 - 16}px`;
+  flyer.style.top = `${s.top + s.height / 2 - 16}px`;
+  flyer.style.width = "32px";
+  flyer.style.height = "32px";
+  flyer.style.objectFit = "cover";
+  flyer.style.borderRadius = "8px";
+  flyer.style.boxShadow = "0 6px 20px rgba(0,0,0,.35)";
+  flyer.style.zIndex = "9999";
+  flyer.style.opacity = "0.95";
+  flyer.style.transform = "translate(0, 0) scale(1)";
+  flyer.style.transition = "transform 600ms cubic-bezier(.22,.61,.36,1), opacity 600ms cubic-bezier(.22,.61,.36,1)";
+
+  document.body.appendChild(flyer);
+
+  requestAnimationFrame(() => {
+    const dx = (e.left + e.width / 2) - (s.left + s.width / 2);
+    const dy = (e.top + e.height / 2) - (s.top + s.height / 2);
+    flyer.style.transform = `translate(${dx}px, ${dy}px) scale(0.6)`;
+    flyer.style.opacity = "0.1";
+  });
+
+  const cleanup = () => flyer.parentElement && flyer.parentElement.removeChild(flyer);
+  flyer.addEventListener("transitionend", cleanup, { once: true });
+}
+
 export default function Products() {
   const { items, add, inc, dec, remove, clear, count, total } = useLocalCart();
   const [drawer, setDrawer] = useState(false);
-  const [firstAdd, setFirstAdd] = useState(false);
 
   const [tab, setTab] = useState("products");
   const [products, setProducts] = useState([]);
@@ -229,6 +320,17 @@ export default function Products() {
   const [q, setQ] = useState("");
   const [sort, setSort] = useState("relevance");
   const [hideSold, setHideSold] = useState(true);
+
+  // Feedback states
+  const [toast, setToast] = useState(false);
+  const [badgeBump, setBadgeBump] = useState(false);
+  const cartBtnRef = useRef(null);
+
+  // First-add modal (PERSISTED)
+  const [firstAdd, setFirstAdd] = useState(() => {
+    try { return localStorage.getItem("firstAddSeen") === "1" ? false : true; }
+    catch { return true; }
+  });
 
   useEffect(() => {
     let alive = true;
@@ -255,12 +357,32 @@ export default function Products() {
     return () => { alive = false; };
   }, []);
 
-  const onAddToCart = (it) => {
+  // Add to cart with animations & modal
+  const onAddToCart = (it, startEl) => {
     add(it);
-    if (!localStorage.getItem("cartFirstAddShown")) {
-      setFirstAdd(true);
-      localStorage.setItem("cartFirstAddShown", "1");
+
+    // Fly image to cart button
+    const imgSrc = firstImageOf(it);
+    if (startEl && cartBtnRef.current) {
+      flyToCart(startEl, cartBtnRef.current, imgSrc);
     }
+
+    // Bump the badge
+    setBadgeBump(true);
+    setTimeout(() => setBadgeBump(false), 250);
+
+    // First time: show modal
+    if (firstAdd) {
+      setFirstAdd(true); 
+    } else {
+      setToast(true);
+      setTimeout(() => setToast(false), 1800);
+    }
+  };
+
+  const markFirstAddSeen = () => {
+    try { localStorage.setItem("firstAddSeen", "1"); } catch {}
+    setFirstAdd(false);
   };
 
   const filteredProducts = useMemo(() => {
@@ -301,7 +423,6 @@ export default function Products() {
   }, [services, q, sort]);
 
   return (
-    // IMPORTANT: pt-16 keeps page content under nav bar but its hard coded so should be fixed later :p
     <div className="bg-neutral-950 text-white min-h-screen pt-16">
       <div className="top-16 z-40 bg-neutral-950/70 border-b border-white/10 backdrop-blur">
         <header className="mx-auto w-full max-w-7xl px-4 py-4">
@@ -312,13 +433,34 @@ export default function Products() {
             </div>
             <div className="flex items-center gap-3">
               <div className="text-sm text-neutral-400">
-                Cart items: <span className="font-semibold text-white">{count}</span>
+                Cart items:{" "}
+                <span className={cls(
+                  "inline-flex min-w-6 items-center justify-center rounded px-1.5 font-semibold text-white transition-transform",
+                  badgeBump && "scale-110"
+                )}>
+                  {count}
+                </span>
               </div>
               <button
+                ref={cartBtnRef}
                 onClick={()=>setDrawer(true)}
-                className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-neutral-900/60 px-3 py-2 text-sm hover:bg-neutral-900"
+                className={cls(
+                  "relative inline-flex items-center gap-2 rounded-lg border border-white/10 bg-neutral-900/60 px-3 py-2 text-sm hover:bg-neutral-900 transition-transform",
+                  badgeBump && "scale-105"
+                )}
               >
                 <ShoppingCart size={16}/> View cart
+                <span
+                  className={cls(
+                    "absolute -top-1 -right-1 grid h-5 w-5 place-items-center rounded-full bg-white text-[11px] font-semibold text-neutral-900",
+                    "transition-transform",
+                    badgeBump && "scale-110"
+                  )}
+                  aria-label="Items in cart"
+                  title={`${count} item(s)`}
+                >
+                  {count}
+                </span>
               </button>
             </div>
           </div>
@@ -368,6 +510,7 @@ export default function Products() {
           </div>
         </header>
       </div>
+
       <main className="mx-auto w-full max-w-7xl px-4 pb-16 pt-6">
         {err && (
           <div className="mb-6 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-rose-200">
@@ -407,24 +550,15 @@ export default function Products() {
           <p className="text-neutral-400">No services found.</p>
         )}
       </main>
-      {firstAdd && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50">
-          <div className="w-[min(92vw,420px)] rounded-xl border border-white/10 bg-neutral-950 p-5 text-white">
-            <h3 className="text-lg font-semibold">Added to cart</h3>
-            <p className="mt-1 text-sm text-neutral-300">Want to check out now or continue shopping?</p>
-            <div className="mt-4 flex gap-2">
-              <button className="flex-1 rounded-lg bg-white py-2 font-semibold text-neutral-900 hover:bg-neutral-200"
-                onClick={() => { setFirstAdd(false); setDrawer(true); }}>
-                Go to checkout
-              </button>
-              <button className="flex-1 rounded-lg border border-white/15 py-2 hover:bg-white/5"
-                onClick={() => setFirstAdd(false)}>
-                Continue shopping
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+
+      <Toast show={toast}>✅ Added to cart</Toast>
+
+      <FirstAddModal
+        show={firstAdd && count > 0}
+        onClose={() => { markFirstAddSeen(); }}
+        onGoToCart={() => { markFirstAddSeen(); setDrawer(true); }}
+      />
+
       <CartDrawer
         open={drawer}
         onClose={()=>setDrawer(false)}
