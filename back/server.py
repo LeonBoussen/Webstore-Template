@@ -1,3 +1,4 @@
+import uuid
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import sqlite3
@@ -20,6 +21,8 @@ except Exception:
     PIL_AVAILABLE = False
 
 app = Flask(__name__, static_folder="static")
+app.config["JSON_SORT_KEYS"] = False
+
 CORS(app)
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-change-me")
@@ -178,6 +181,75 @@ def verify_password(password: str, stored_hash_b64: str, salt_b64: str) -> bool:
         return hmac.compare_digest(calc, stored_hash_b64)
     except Exception:
         return False
+
+def _normalize_rel(url: str):
+    if not url:
+        return None
+    u = url.strip()
+    # absolute http(s) allowed as-is
+    if u.startswith("http://") or u.startswith("https://"):
+        return u
+    # force leading slash
+    if not u.startswith("/"):
+        u = "/" + u
+    # normalize legacy /uploads/* to /static/uploads/*
+    if u.startswith("/uploads/"):
+        u = "/static" + u
+    return u
+
+def _allowed_file(filename: str) -> bool:
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXT
+
+
+def save_image_and_get_rel_url(file_storage) -> str:
+    if not file_storage or not getattr(file_storage, "filename", None):
+        raise ValueError("No file")
+    if not _allowed_file(file_storage.filename):
+        raise ValueError("Unsupported file type")
+
+    # Always save as WEBP to strip EXIF and keep small
+    fname = f"{uuid.uuid4().hex}.webp"
+    dest = os.path.join(UPLOAD_DIR, fname)
+
+    if Image is None:
+        # Fallback: raw save (no EXIF removal/resize). Pillow recommended.
+        file_storage.save(dest)
+    else:
+        img = Image.open(file_storage.stream).convert("RGB")
+        img.thumbnail((720, 720))  # Resize to max 720x720
+        img.save(dest, "WEBP", quality=88, method=6)
+
+    return f"/static/uploads/products/{fname}"
+
+def get_product_with_images(pid: int):
+    with db() as conn:
+        cur = conn.cursor()
+        p = cur.execute("""
+            SELECT id, name, bio, price, discount_price, limited_edition, sold_out, active, image_path
+              FROM products
+             WHERE id = ?
+        """, (pid,)).fetchone()
+        if not p:
+            return None
+        imgs = [r["image_path"] for r in cur.execute("""
+            SELECT image_path
+              FROM product_images
+             WHERE product_id = ?
+             ORDER BY sort_order ASC, id ASC
+        """, (pid,)).fetchall()]
+        first = imgs[0] if imgs else (p["image_path"] or None)
+        return {
+            "id": p["id"],
+            "name": p["name"],
+            "bio": p["bio"],
+            "price": p["price"],
+            "discount_price": p["discount_price"],
+            "limited_edition": p["limited_edition"],
+            "sold_out": p["sold_out"],
+            "active": p["active"],
+            "image_url": first,
+            "images": imgs,
+        }
 
 
 @app.route('/api/catchphrase', methods=['GET'])
