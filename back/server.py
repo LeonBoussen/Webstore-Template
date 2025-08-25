@@ -1,3 +1,5 @@
+import init_db
+import uuid
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import sqlite3
@@ -8,6 +10,7 @@ import os, hashlib, hmac, base64, json, time
 from functools import wraps
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
+
 
 load_dotenv()
 colorama.init(autoreset=True)
@@ -20,6 +23,8 @@ except Exception:
     PIL_AVAILABLE = False
 
 app = Flask(__name__, static_folder="static")
+app.config["JSON_SORT_KEYS"] = False
+
 CORS(app)
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-change-me")
@@ -28,9 +33,8 @@ UPLOAD_DIR = os.path.join(os.getcwd(), "static", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "5"))
 ALLOWED_EXT = {".png", ".jpg", ".jpeg", ".webp"}
-
+DATABASE = 'shop.db'
 PBKDF2_ITERATIONS = 200_000  # used by hash_password/verify_password
-
 
 def log(message, status="DEFAULT"):
     try:
@@ -56,15 +60,12 @@ def log(message, status="DEFAULT"):
         with open("server.log", "a", encoding="utf-8") as f:
             f.write(fallback_msg + "\n")
 
-
 def b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
-
 
 def ub64url(data: str) -> bytes:
     padding = "=" * ((4 - len(data) % 4) % 4)
     return base64.urlsafe_b64decode(data + padding)
-
 
 def sign_token(payload: dict, exp_seconds: int = 3600):
     body = payload.copy()
@@ -72,7 +73,6 @@ def sign_token(payload: dict, exp_seconds: int = 3600):
     raw = json.dumps(body, separators=(",", ":")).encode()
     sig = hmac.new(SECRET_KEY.encode(), raw, hashlib.sha256).digest()
     return f"{b64url(raw)}.{b64url(sig)}"
-
 
 def verify_token(token: str):
     try:
@@ -88,10 +88,8 @@ def verify_token(token: str):
     except Exception:
         return None
 
-
 def db():
-    return sqlite3.connect('shop.db')
-
+    return sqlite3.connect(DATABASE)
 
 def require_admin(fn):
     @wraps(fn)
@@ -114,7 +112,6 @@ def require_admin(fn):
         return fn(*args, **kwargs)
     return wrapper
 
-
 def require_user(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -129,32 +126,27 @@ def require_user(fn):
         return fn(*args, **kwargs)
     return wrapper
 
-
 def row_to_product(r):
     return {
         "id": r[0], "name": r[1], "bio": r[2],
         "price": r[3], "discount_price": r[4],
-        "image_url": f"{r[5]}" if r[5] else None, 
-        "limited_edition": r[6], "sold_out": r[7]
+        "limited_edition": r[5], "sold_out": r[6],
+        "image_url": r[7] if r[7] else None
     }
-
 
 def row_to_service(r):
     return {
         "id": r[0], "name": r[1], "bio": r[2],
         "price": r[3], "discount_price": r[4],
-        "image_url": f"{r[5]}" if r[5] else None,
-        "active": r[6]
+        "active": r[5],
+        "image_url": r[6] if len(r) > 6 else None
     }
-
 
 def _b64e(b: bytes) -> str:
     return base64.b64encode(b).decode('ascii')
 
-
 def _b64d(s: str) -> bytes:
     return base64.b64decode(s.encode('ascii'))
-
 
 def hash_password(password: str) -> tuple[str, str]:
     """
@@ -165,7 +157,6 @@ def hash_password(password: str) -> tuple[str, str]:
     salt = os.urandom(16)
     dk = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt, PBKDF2_ITERATIONS)
     return _b64e(dk), _b64e(salt)
-
 
 def verify_password(password: str, stored_hash_b64: str, salt_b64: str) -> bool:
     """
@@ -178,6 +169,60 @@ def verify_password(password: str, stored_hash_b64: str, salt_b64: str) -> bool:
         return hmac.compare_digest(calc, stored_hash_b64)
     except Exception:
         return False
+
+def _allowed_file(filename: str) -> bool:
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXT
+
+
+def save_image_and_get_rel_url(file_storage) -> str:
+    if not file_storage or not getattr(file_storage, "filename", None):
+        raise ValueError("No file")
+    if not _allowed_file(file_storage.filename):
+        raise ValueError("Unsupported file type")
+
+    # Always save as WEBP to strip EXIF and keep small
+    fname = f"{uuid.uuid4().hex}.webp"
+    dest = os.path.join(UPLOAD_DIR, fname)
+
+    if Image is None:
+        # Fallback: raw save (no EXIF removal/resize). Pillow recommended.
+        file_storage.save(dest)
+    else:
+        img = Image.open(file_storage.stream).convert("RGB")
+        img.thumbnail((720, 720))  # Resize to max 720x720
+        img.save(dest, "WEBP", quality=88, method=6)
+
+    # Return where we actually saved it
+    return f"/static/uploads/{fname}"
+
+def get_product_with_images(pid: int):
+    # Helper: returns product + all its images (first image as image_url)
+    with db() as conn:
+        cur = conn.cursor()
+        p = cur.execute("""
+            SELECT id, name, bio, price, discount_price, limited_edition, sold_out
+              FROM products
+             WHERE id = ?
+        """, (pid,)).fetchone()
+        if not p:
+            return None
+        imgs = [r[0] for r in cur.execute("""
+            SELECT image_path FROM product_images
+             WHERE product_id = ?
+             ORDER BY sort_order ASC, id ASC
+        """, (pid,)).fetchall()]
+        first = imgs[0] if imgs else None
+        return {
+            "id": p[0],
+            "name": p[1],
+            "bio": p[2],
+            "price": p[3],
+            "discount_price": p[4],
+            "limited_edition": p[5],
+            "sold_out": p[6],
+            "image_url": first,
+            "images": imgs,
+        }
 
 
 @app.route('/api/catchphrase', methods=['GET'])
@@ -207,7 +252,20 @@ def catchphrase():
 def products_get():
     conn = db()
     cur = conn.cursor()
-    cur.execute("SELECT id, name, bio, price, discount_price, image_path, limited_edition, sold_out FROM products")
+    # Pull first image via subquery (works with normalized schema)
+    cur.execute("""
+        SELECT
+            p.id, p.name, p.bio, p.price, p.discount_price,
+            p.limited_edition, p.sold_out,
+            (
+                SELECT pi.image_path
+                  FROM product_images pi
+                 WHERE pi.product_id = p.id
+                 ORDER BY pi.sort_order ASC, pi.id ASC
+                 LIMIT 1
+            ) AS image_url
+        FROM products p
+    """)
     rows = cur.fetchall()
     conn.close()
     return jsonify([row_to_product(r) for r in rows])
@@ -217,7 +275,21 @@ def products_get():
 def services_get():
     conn = db()
     cur = conn.cursor()
-    cur.execute("SELECT id, name, bio, price, discount_price, image_path, active FROM services WHERE active=1")
+    # Same trick for services
+    cur.execute("""
+        SELECT
+            s.id, s.name, s.bio, s.price, s.discount_price,
+            s.active,
+            (
+                SELECT si.image_path
+                  FROM service_images si
+                 WHERE si.service_id = s.id
+                 ORDER BY si.sort_order ASC, si.id ASC
+                 LIMIT 1
+            ) AS image_url
+        FROM services s
+        WHERE s.active=1
+    """)
     rows = cur.fetchall()
     conn.close()
     return jsonify([row_to_service(r) for r in rows])
@@ -372,16 +444,18 @@ def upload_image():
                 img = img.resize((max_w, int(img.height * ratio)))
             # Format inferred from extension; EXIF not passed => stripped
             img.save(out_path, optimize=True, quality=85)
+            log(f"Image uploaded and processed: {out_name}", "INFO")
         else:
             # Fallback: raw save (metadata may remain)
             f.save(out_path)
+            log(f"Image uploaded without processing of metadata, data might precist (Pillow not installed): {out_name}", "WARNING")
     except Exception as e:
         log(f"Upload processing failed: {e}", "ERROR")
         return jsonify({"error": "failed to process image"}), 500
 
     rel_url = f"/static/uploads/{out_name}"
+    log(f"Image successfully saved: {rel_url}", "SUCCESS")
     return jsonify({"image_url": rel_url}), 201
-
 
 @app.route('/api/products', methods=['POST'])
 @require_admin
@@ -391,57 +465,103 @@ def products_create():
     price = data.get('price')
     bio = data.get('bio')
     discount_price = data.get('discount_price')
-    image_path = data.get('image_url')
     limited = int(bool(data.get('limited_edition', 0)))
     sold_out = int(bool(data.get('sold_out', 0)))
+    images = data.get('images') or []
+    if not images and data.get('image_url'):
+        images = [data['image_url']]
+
     if not name or price is None:
         return jsonify({"error": "`name` and `price` are required"}), 400
-    conn = db()
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO products (name, bio, price, discount_price, image_path, limited_edition, sold_out)
-        VALUES (?,?,?,?,?,?,?)
-    """, (name, bio, price, discount_price, image_path, limited, sold_out))
-    conn.commit()
-    new_id = cur.lastrowid
-    conn.close()
-    return jsonify({"id": new_id}), 201
 
+    conn = db()
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")  # enable FK (SQLite quirk)
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO products (name, bio, price, discount_price, limited_edition, sold_out)
+            VALUES (?,?,?,?,?,?)
+        """, (name, bio, price, discount_price, limited, sold_out))
+        new_id = cur.lastrowid
+
+        if images:
+            cur.executemany(
+                "INSERT INTO product_images (product_id, image_path, alt_text, sort_order) VALUES (?,?,?,?)",
+                [(new_id, p, None, i) for i, p in enumerate(images)]
+            )
+
+        conn.commit()
+        return jsonify({"id": new_id}), 201
+    finally:
+        conn.close()
 
 @app.route('/api/products/<int:pid>', methods=['PUT'])
 @require_admin
 def products_update(pid):
     data = request.get_json(force=True)
+    field_map = {
+        "name": "name",
+        "bio": "bio",
+        "price": "price",
+        "discount_price": "discount_price",
+        "limited_edition": "limited_edition",
+        "sold_out": "sold_out",
+    }
+
     fields, values = [], []
-    for key in ("name", "bio", "price", "discount_price", "image_url", "limited_edition", "sold_out"):
+    for key, col in field_map.items():
         if key in data:
-            col = "image_path" if key == "image_url" else key
-            fields.append(f"{col}=?")
             if key in ("limited_edition", "sold_out"):
+                fields.append(f"{col}=?")
                 values.append(int(bool(data[key])))
             else:
+                fields.append(f"{col}=?")
                 values.append(data[key])
-    if not fields:
-        return jsonify({"error": "no fields to update"}), 400
-    values.append(pid)
-    conn = db()
-    cur = conn.cursor()
-    cur.execute(f"UPDATE products SET {', '.join(fields)} WHERE id=?", values)
-    conn.commit()
-    conn.close()
-    return jsonify({"ok": True})
 
+    replace_images = None
+    if "images" in data:
+        replace_images = data.get("images") or []
+    elif "image_url" in data:
+        replace_images = [data["image_url"]] if data["image_url"] else []
+
+    if not fields and replace_images is None:
+        return jsonify({"error": "no fields to update"}), 400
+
+    conn = db()
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        cur = conn.cursor()
+
+        if fields:
+            values.append(pid)
+            cur.execute(f"UPDATE products SET {', '.join(fields)} WHERE id=?", values)
+
+        if replace_images is not None:
+            cur.execute("DELETE FROM product_images WHERE product_id=?", (pid,))
+            if replace_images:
+                cur.executemany(
+                    "INSERT INTO product_images (product_id, image_path, alt_text, sort_order) VALUES (?,?,?,?)",
+                    [(pid, p, None, i) for i, p in enumerate(replace_images)]
+                )
+
+        conn.commit()
+        return jsonify({"ok": True})
+    finally:
+        conn.close()
 
 @app.route('/api/products/<int:pid>', methods=['DELETE'])
 @require_admin
 def products_delete(pid):
     conn = db()
-    cur = conn.cursor()
-    cur.execute("DELETE FROM products WHERE id=?", (pid,))
-    conn.commit()
-    conn.close()
-    return jsonify({"ok": True})
-
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        cur = conn.cursor()
+        # product_images will cascade
+        cur.execute("DELETE FROM products WHERE id=?", (pid,))
+        conn.commit()
+        return jsonify({"ok": True})
+    finally:
+        conn.close()
 
 @app.route('/api/services', methods=['POST'])
 @require_admin
@@ -451,73 +571,134 @@ def services_create():
     price = data.get('price')
     bio = data.get('bio')
     discount_price = data.get('discount_price')
-    image_path = data.get('image_url')
     active = int(bool(data.get('active', 1)))
+
+    images = data.get('images') or []
+    if not images and data.get('image_url'):
+        images = [data['image_url']]
+
     if not name or price is None:
         return jsonify({"error": "`name` and `price` are required"}), 400
-    conn = db()
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO services (name, bio, price, discount_price, image_path, active)
-        VALUES (?,?,?,?,?,?)
-    """, (name, bio, price, discount_price, image_path, active))
-    conn.commit()
-    new_id = cur.lastrowid
-    conn.close()
-    return jsonify({"id": new_id}), 201
 
+    conn = db()
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO services (name, bio, price, discount_price, active)
+            VALUES (?,?,?,?,?)
+        """, (name, bio, price, discount_price, active))
+        new_id = cur.lastrowid
+
+        if images:
+            cur.executemany(
+                "INSERT INTO service_images (service_id, image_path, alt_text, sort_order) VALUES (?,?,?,?)",
+                [(new_id, p, None, i) for i, p in enumerate(images)]
+            )
+
+        conn.commit()
+        return jsonify({"id": new_id}), 201
+    finally:
+        conn.close()
 
 @app.route('/api/services/<int:sid>', methods=['PUT'])
 @require_admin
 def services_update(sid):
     data = request.get_json(force=True)
+    field_map = {
+        "name": "name",
+        "bio": "bio",
+        "price": "price",
+        "discount_price": "discount_price",
+        "active": "active",
+    }
+
     fields, values = [], []
-    for key in ("name", "bio", "price", "discount_price", "image_url", "active"):
+    for key, col in field_map.items():
         if key in data:
-            col = "image_path" if key == "image_url" else key
             if key == "active":
                 fields.append(f"{col}=?")
                 values.append(int(bool(data[key])))
             else:
                 fields.append(f"{col}=?")
                 values.append(data[key])
-    if not fields:
-        return jsonify({"error": "no fields to update"}), 400
-    values.append(sid)
-    conn = db()
-    cur = conn.cursor()
-    cur.execute(f"UPDATE services SET {', '.join(fields)} WHERE id=?", values)
-    conn.commit()
-    conn.close()
-    return jsonify({"ok": True})
 
+    replace_images = None
+    if "images" in data:
+        replace_images = data.get("images") or []
+    elif "image_url" in data:
+        replace_images = [data["image_url"]] if data["image_url"] else []
+
+    if not fields and replace_images is None:
+        return jsonify({"error": "no fields to update"}), 400
+
+    conn = db()
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        cur = conn.cursor()
+
+        if fields:
+            values.append(sid)
+            cur.execute(f"UPDATE services SET {', '.join(fields)} WHERE id=?", values)
+
+        if replace_images is not None:
+            cur.execute("DELETE FROM service_images WHERE service_id=?", (sid,))
+            if replace_images:
+                cur.executemany(
+                    "INSERT INTO service_images (service_id, image_path, alt_text, sort_order) VALUES (?,?,?,?)",
+                    [(sid, p, None, i) for i, p in enumerate(replace_images)]
+                )
+
+        conn.commit()
+        return jsonify({"ok": True})
+    finally:
+        conn.close()
 
 @app.route('/api/services/<int:sid>', methods=['DELETE'])
 @require_admin
 def services_delete(sid):
     conn = db()
-    cur = conn.cursor()
-    cur.execute("DELETE FROM services WHERE id=?", (sid,))
-    conn.commit()
-    conn.close()
-    return jsonify({"ok": True})
-
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        cur = conn.cursor()
+        cur.execute("DELETE FROM services WHERE id=?", (sid,))
+        conn.commit()
+        return jsonify({"ok": True})
+    finally:
+        conn.close()
 
 @app.route('/static/uploads/<path:filename>')
 def uploaded_file(filename):
     return send_from_directory(UPLOAD_DIR, filename)
 
-
 if __name__ == '__main__':
-    log("server.py has been launched!", "INFO")
-    try:
-        log("Starting Flask server...", "SUCCESS")
-        app.run(host="127.0.0.1", port=5000)
-    except KeyboardInterrupt:
-        log("Server shutdown initiated by user keyboard interruption", "WARNING")
-        exit(0)
-    except Exception as e:
-        log(f"Error starting server: {e}", "ERROR")
-    finally:
-        log("Exiting main block and shutting down server", "WARNING")
-        exit(0)
+    while True:
+        try:
+            if not os.path.exists(DATABASE):
+                log("No database found → creating a new one...", "INFO")
+                init_db.create_or_update_db_table()
+                log("Database created and initialized.", "SUCCESS")
+            else:
+                log("Database found → checking schema and upgrading if needed...", "INFO")
+                init_db.create_or_update_db_table()
+                log("Database schema is up to date.", "SUCCESS")
+            
+            log("server.py has been launched!", "INFO")
+            try:
+                log("Starting Flask server...", "INFO")
+                app.run(host="127.0.0.1", port=5000)
+            except KeyboardInterrupt:
+                log("Server shutdown initiated by user keyboard interruption", "WARNING")
+                exit(0)
+            except Exception as e:
+                log(f"Error starting server: {e}", "ERROR")
+            finally:
+                log("Exiting main block and shutting down server", "WARNING")
+                exit(0)
+        except Exception as e:
+            log("An error occurred in the main while loop.", "WARNING")
+            log(f"Top level error: {e}", "ERROR")
+            time.sleep(5)
+        finally:
+            log("Restarting main while loop...", "INFO")
+            break
