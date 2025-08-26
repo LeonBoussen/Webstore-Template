@@ -59,13 +59,13 @@ const Home = () => {
           </div>
           <div className="flex flex-wrap gap-4 justify-center mt-6">
             <a
-              href="#top-products"
+              href="/products"
               className="px-6 py-3 rounded-full bg-cyan-500 text-white font-semibold shadow-lg hover:shadow-cyan-500/50 hover:bg-cyan-400 transition-all"
             >
               Explore Products
             </a>
             <a
-              href="#about"
+              href="#top-products"
               className="px-6 py-3 rounded-full border border-white text-white font-semibold hover:bg-white hover:text-black transition-all"
             >
               Learn More

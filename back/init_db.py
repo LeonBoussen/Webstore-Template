@@ -113,6 +113,23 @@ def create_or_update_db_table():
                 FOREIGN KEY (service_id) REFERENCES services(id) ON DELETE CASCADE
             )
         ''')
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS discount_codes (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                code          TEXT NOT NULL UNIQUE,
+                kind          TEXT NOT NULL CHECK (kind IN ('percent','fixed')),
+                value         REAL NOT NULL CHECK (value >= 0),
+                active        INTEGER NOT NULL DEFAULT 1,               -- 1=true, 0=false
+                starts_at     TEXT,                                     -- ISO8601 or NULL
+                expires_at    TEXT,                                     -- ISO8601 or NULL
+                max_uses      INTEGER,                                  -- NULL = unlimited
+                used_count    INTEGER NOT NULL DEFAULT 0,
+                applies_to    TEXT DEFAULT 'all',                       -- 'all' | 'product' | 'service' (extend as needed)
+                created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            """)
+
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_service_images_service_id ON service_images(service_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_service_images_sort ON service_images(service_id, sort_order)')
 
