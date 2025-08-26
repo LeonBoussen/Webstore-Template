@@ -11,6 +11,7 @@ import Signup from './pages/Signup';
 import Admin from './pages/Admin';
 import Account from './pages/Account'
 import ProductDetails from './pages/ProductDetails';
+import Checkout from './pages/Checkout';
 
 function App() {
   return (
@@ -27,8 +28,9 @@ function App() {
             <Route path="/signup" element={<Signup />} />
             <Route path="/admin" element={<Admin />} />
             <Route path="/account" element={<Account />} />
+            <Route path="/checkout" element={<Checkout/>} />
 
-            <Route path="*" element={<div className="p-6">This page is not here, contact the developer!</div>} />
+            <Route path="*" element={<div className="p-6">404 - This page is not here, contact the developer!</div>} />
           </Routes>
     </Router>
   );

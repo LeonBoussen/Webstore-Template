@@ -66,7 +66,7 @@ export default function Navbar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex h-16 items-center justify-between text-white">
           <Link to="/" className="text-2xl font-bold tracking-wide text-cyan-500 hover:text-cyan-300 transition">
-            Trippy
+            Webshop
           </Link>
 
           <div className="hidden md:flex items-center gap-6">
@@ -114,12 +114,6 @@ export default function Navbar() {
           </button>
         </div>
       </div>
-      {isOpen && (
-        <button
-          onClick={() => setIsOpen(false)}
-          className="fixed inset-0 top-16 bg-black/40 md:hidden"
-          aria-label="Close menu backdrop"/>
-      )}
       <div
         id="mobile-menu"
         className={`md:hidden fixed top-16 inset-x-0 transform transition-all duration-200 ${
@@ -128,17 +122,17 @@ export default function Navbar() {
       >
         <div
           className="
-            bg-[#0a1a1a]  /* Solid dark green/blue tone */
-            border-t border-white/10 
-            shadow-2xl 
-            px-4 pt-2 pb-4 space-y-2
+            bg-gradient-to-b from-neutral-950 via-neutral-900 to-neutral-950 
+            border-t border-white/30
+            shadow-5xl 
+            px-4 pt-3 pb-6 space-y-2
           "
         >
           {links.map(({ label, path }) => (
             <Link
               key={label}
               to={path}
-              className="block py-2 px-3 rounded-lg text-white hover:bg-cyan-500/20 hover:text-cyan-300 transition"
+              className="block w-full py-2 px-3 rounded-lg text-white hover:bg-cyan-600 hover:text-white transition font-medium"
             >
               {label}
             </Link>
@@ -147,7 +141,7 @@ export default function Navbar() {
           {isAdmin && (
             <Link
               to="/admin"
-              className="block py-2 px-3 rounded-lg bg-cyan-600 text-white hover:bg-cyan-500 transition"
+              className="block w-full py-2 px-3 rounded-lg bg-cyan-600 text-white hover:bg-cyan-500 transition font-medium"
             >
               <span className="inline-flex items-center gap-2">
                 <Shield size={18} /> Admin
@@ -158,19 +152,19 @@ export default function Navbar() {
           {!isLoggedIn ? (
             <Link
               to="/login"
-              className="block py-2 px-3 rounded-lg border border-white/15 text-white hover:bg-white hover:text-black transition"
+              className="block w-full py-2 px-3 rounded-lg border border-white/20 text-white hover:bg-white hover:text-black transition font-medium"
             >
               <span className="inline-flex items-center gap-2">
                 <LogIn size={18} /> Login
               </span>
             </Link>
           ) : (
-            <button
+            <Link
               to="/account"
-              className="w-full text-left py-2 px-3 rounded-lg bg-neutral-800 text-white hover:bg-neutral-700 transition"
+              className="block w-full py-2 px-3 rounded-lg bg-neutral-800 text-white hover:bg-neutral-700 transition font-medium"
             >
               <span className="inline-flex items-center gap-2">Account</span>
-            </button>
+            </Link>
           )}
         </div>
       </div>

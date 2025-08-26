@@ -140,7 +140,7 @@ const Card = ({ item, kind, onAdd }) => {
           </div>
         </div>
         {bio && <p className="text-sm text-neutral-300 max-h-12 overflow-hidden">{bio}</p>}
-        <div className="mt-2 flex items-center justify-between gap-3">
+        <div className="mt-2 flex items-center justify-between">
           <Price price={price} discount={discount_price} />
           <button
             onClick={(e) => onAdd({ ...item, kind }, e.currentTarget)}
@@ -208,12 +208,14 @@ const CartDrawer = ({ open, onClose, items, inc, dec, remove, total }) => (
           );
         })}
       </div>
-      <div className="border-t border-white/10 p-4">
+      <div className="border-t border-white/10 -mt-4 bg-gradient-to-b from-neutral-950 via-neutral-900 to-neutral-950  relative z-50">
         <div className="flex items-center justify-between">
           <span className="text-neutral-300">Total</span>
           <span className="text-lg font-semibold">{fmt.format(total)}</span>
         </div>
-        <button className="mt-3 w-full rounded-lg bg-white text-neutral-900 font-semibold py-2 hover:bg-neutral-200">Go to checkout</button>
+        <Link to="/checkout" className="mt-3 block w-full rounded-lg bg-white text-neutral-900 text-center font-semibold py-2 hover:bg-neutral-200">
+          Go to checkout
+        </Link>
       </div>
     </aside>
   </>
@@ -423,7 +425,7 @@ export default function Products() {
   }, [services, q, sort]);
 
   return (
-    <div className="bg-neutral-950 text-white min-h-screen pt-16">
+    <div className="bg-neutral-950 text-white min-h-[100dvh] pt-16 overflow-x-hidden">
       <div className="top-16 z-40 bg-neutral-950/70 border-b border-white/10 backdrop-blur">
         <header className="mx-auto w-full max-w-7xl px-4 py-4">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -511,7 +513,7 @@ export default function Products() {
         </header>
       </div>
 
-      <main className="mx-auto w-full max-w-7xl px-4 pb-16 pt-6">
+      <main className="mx-auto w-full max-w-7xl px-4 pt-6 pb-24">
         {err && (
           <div className="mb-6 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-rose-200">
             {String(err)}
