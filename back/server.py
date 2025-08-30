@@ -270,6 +270,14 @@ def products_get():
     conn.close()
     return jsonify([row_to_product(r) for r in rows])
 
+# NEW: return a single product with its full images array
+@app.route('/api/products/<int:pid>', methods=['GET'])
+def products_get_one(pid):
+    p = get_product_with_images(pid)
+    if not p:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(p)
+
 
 @app.route('/api/services', methods=['GET'])
 def services_get():
