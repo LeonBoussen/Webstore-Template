@@ -9,6 +9,7 @@ const API_BASE = "http://127.0.0.1:5000";
 const fmt = new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" });
 const isUrl = (s) => typeof s === "string" && /^https?:\/\//i.test(s);
 const withBase = (u) => (!u ? null : isUrl(u) ? u : `${API_BASE}${u.startsWith("/") ? "" : "/"}${u}`);
+const PRESS = "transition-transform duration-150 motion-reduce:transition-none motion-safe:active:scale-95";
 
 const percentOff = (price, discount) =>
   discount && discount < price ? Math.round(100 - (discount / price) * 100) : 0;
@@ -23,7 +24,6 @@ function useLocalCart() {
     localStorage.setItem("cart", JSON.stringify(arr));
     setItems(arr);
     const total = arr.reduce((n, it) => n + (it.qty || 1), 0);
-    // keep global cart count in sync with existing code via event  :contentReference[oaicite:3]{index=3}
     window.dispatchEvent(new CustomEvent("cart:updated", { detail: { total } }));
   };
 
@@ -41,7 +41,6 @@ function useLocalCart() {
   return { add };
 }
 
-// UI bits reused
 const Price = ({ price, discount, large = false }) => {
   const off = percentOff(price, discount);
   if (discount && discount < price) {
@@ -74,10 +73,11 @@ const Badge = ({ children }) => (
   </span>
 );
 
+// Prefer server-provided p.images if present; otherwise fall back to common fields.
 function buildGallery(p) {
-  const arr = Array.isArray(p?.image_urls) ? p.image_urls
-           : Array.isArray(p?.images)     ? p.images
-           : Array.isArray(p?.gallery)    ? p.gallery
+  const arr = Array.isArray(p?.images)      ? p.images
+           : Array.isArray(p?.image_urls)   ? p.image_urls
+           : Array.isArray(p?.gallery)      ? p.gallery
            : [p?.image1, p?.image2, p?.image3, p?.image_url, p?.image_url2, p?.image_url3, p?.image_path].filter(Boolean);
   return arr.map(withBase).filter(Boolean);
 }
@@ -116,15 +116,17 @@ const Gallery = ({ images = [], alt = "" }) => {
           decoding="async"
         />
         <button
+          type="button"
           onClick={() => setI((x) => at(x - 1))}
-          className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-black/40 p-2 backdrop-blur hover:bg-black/60"
+          className={`absolute left-2 top-1/2 -translate-y-1/2 z-10 rounded-full bg-black/40 p-2 backdrop-blur hover:bg-black/60 ${PRESS} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60`}
           aria-label="Previous image"
         >
           <ChevronLeft size={18} />
         </button>
         <button
+          type="button"
           onClick={() => setI((x) => at(x + 1))}
-          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-black/40 p-2 backdrop-blur hover:bg-black/60"
+          className="absolute right-2 top-1/2 -translate-y-1/2 z-10 rounded-full bg-black/40 p-2 backdrop-blur hover:bg-black/60"
           aria-label="Next image"
         >
           <ChevronRight size={18} />
@@ -137,15 +139,17 @@ const Gallery = ({ images = [], alt = "" }) => {
           <div className="flex gap-2">
             {images.map((src, idx) => (
               <button
+                type="button"
                 key={idx}
                 onClick={() => setI(idx)}
-                className={`relative aspect-[4/3] overflow-hidden rounded-lg bg-neutral-800 ring-1 ring-white/10 ${i === idx ? "ring-2 ring-cyan-400" : ""}`}
+                className={`relative w-24 flex-none aspect-[4/3] overflow-hidden rounded-lg bg-neutral-800 ring-1 ring-white/10 ${
+                  i === idx
+                    ? "ring-2 ring-cyan-400 ring-offset-2 ring-offset-neutral-900"
+                    : ""
+                }`}
                 aria-label={`Image ${idx + 1}`}
               >
                 <img src={src} alt="" className="h-full w-full object-cover" />
-                {i === idx && (
-                  <span className="pointer-events-none absolute inset-0 ring-2 ring-cyan-400/60 rounded-lg" />
-                )}
               </button>
             ))}
           </div>
@@ -166,10 +170,12 @@ export default function ProductDetails() {
   const [err, setErr] = useState("");
   const [qty, setQty] = useState(1);
 
-  // Fetch detail (tries /api/products/:id, falls back to listing)
+  // Always ensure we have the full product (incl. images) from /api/products/:id.
   useEffect(() => {
     let alive = true;
-    if (product) return;
+
+    const shouldFetch =
+      !product || !(Array.isArray(product.images) && product.images.length > 1);
 
     async function fetchDetail() {
       setErr("");
@@ -180,6 +186,7 @@ export default function ProductDetails() {
           const data = await byId.json();
           if (alive) setProduct(data);
         } else {
+          // Fallback to list (older backends / products that where made before the database update for multi images)
           const list = await fetch(`${API_BASE}/api/products`);
           const arr = list.ok ? await list.json() : [];
           const p = Array.isArray(arr) ? arr.find((x) => String(x.id) === String(id)) : null;
@@ -192,9 +199,11 @@ export default function ProductDetails() {
         if (alive) setLoading(false);
       }
     }
-    fetchDetail();
+
+    if (shouldFetch) fetchDetail();
     return () => { alive = false; };
-  }, [id, product]);
+    // Intentionally NOT depending on `product` to avoid loops; we only fetch when landing.
+  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const gallery = useMemo(() => buildGallery(product || {}), [product]);
   const soldOut = !!product?.sold_out;
@@ -219,17 +228,14 @@ export default function ProductDetails() {
 
   const onBuyNow = () => {
     onAdd();
-    // If you have a checkout route, this will take users there immediately.
     navigate("/checkout");
   };
 
   return (
     <div className="bg-neutral-950 text-white min-h-screen pt-16">
-      {/* Accent background glow, consistent with your hero styling */}
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(40%_25%_at_70%_0%,rgba(56,189,248,0.08),transparent_60%)]" />
 
       <main className="mx-auto w-full max-w-7xl px-4 pb-20">
-        {/* Breadcrumbs */}
         <nav className="pt-6 text-sm text-neutral-400">
           <Link to="/" className="hover:text-white">Home</Link>
           <span className="mx-2 text-neutral-600">/</span>
@@ -260,12 +266,10 @@ export default function ProductDetails() {
           </div>
         ) : product ? (
           <div className="mt-8 grid grid-cols-1 gap-8 lg:grid-cols-12">
-            {/* Left: Gallery */}
             <div className="lg:col-span-7">
               <Gallery images={gallery} alt={product.name} />
             </div>
 
-            {/* Right: Sticky purchase panel */}
             <aside className="lg:col-span-5">
               <div className="lg:sticky lg:top-24 rounded-2xl border border-white/10 bg-neutral-900/60 p-6 shadow-xl backdrop-blur">
                 <div className="flex items-start justify-between gap-3">
@@ -276,7 +280,6 @@ export default function ProductDetails() {
                   </div>
                 </div>
 
-                {/* (Optional) rating slot if you add rating fields later */}
                 <div className="mt-2 flex items-center gap-2 text-sm text-neutral-400">
                   <Star size={16} className="opacity-70" />
                   Trusted by creators & SMBs
@@ -286,12 +289,10 @@ export default function ProductDetails() {
                   <Price price={price} discount={deal} large />
                 </div>
 
-                {/* Short copy for conversions */}
                 {product.bio && (
                   <p className="mt-3 text-sm text-neutral-300">{product.bio}</p>
                 )}
 
-                {/* Quantity & CTAs */}
                 <div className="mt-6 space-y-3">
                   <div className="flex items-center gap-3">
                     <label htmlFor="qty" className="text-sm text-neutral-300">Quantity</label>
@@ -353,7 +354,6 @@ export default function ProductDetails() {
                     </button>
                   </div>
 
-                  {/* Trust signals */}
                   <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-neutral-300">
                     <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-neutral-900/50 px-3 py-2">
                       <ShieldCheck size={16} className="text-emerald-300" />
@@ -371,7 +371,6 @@ export default function ProductDetails() {
                 </div>
               </div>
 
-              {/* Details/Features section */}
               <section className="mt-6 rounded-2xl border border-white/10 bg-neutral-900/40 p-6">
                 <h2 className="text-lg font-semibold">Details</h2>
                 {product.description ? (
