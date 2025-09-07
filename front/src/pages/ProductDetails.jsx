@@ -330,28 +330,62 @@ export default function ProductDetails() {
                     <button
                       onClick={onBuyNow}
                       disabled={soldOut}
-                      className={`flex-1 inline-flex items-center justify-center gap-2 rounded-full px-4 py-3 font-semibold
-                        bg-gradient-to-r from-cyan-500 via-emerald-400 to-cyan-500
-                        hover:opacity-95
+                      className={`relative flex-1 inline-flex items-center justify-center gap-2 rounded-full px-4 py-3 font-semibold
+                        bg-gradient-to-r from-cyan-500 via-emerald-400 to-cyan-500 text-white
+                        hover:opacity-95 overflow-hidden group
+                        touch-manipulation select-none
+                        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/60
+                        ${PRESS}
                         ${soldOut ? "opacity-50 cursor-not-allowed" : ""}
                       `}
                       style={{ boxShadow: "0 0 24px rgba(56,189,248,0.25)" }}
                       aria-label="Buy now"
                     >
-                      <Zap size={18} /> Buy now
+                      {/* content stays above the animated outline */}
+                      <span className="relative z-10 inline-flex items-center gap-2">
+                        <Zap size={18} /> Buy now
+                      </span>
+
+                      {/* smooth fade + draw outline */}
+                      <span
+                        aria-hidden="true"
+                        className="pointer-events-none absolute inset-0 rounded-full
+                                  ring-2 ring-current
+                                  opacity-0 scale-x-0 origin-left
+                                  transition-[opacity,transform] duration-500 ease-out
+                                  group-hover:opacity-100 group-hover:scale-x-100
+                                  group-focus-visible:opacity-100 group-focus-visible:scale-x-100"
+                      />
                     </button>
 
                     <button
                       onClick={onAdd}
                       disabled={soldOut}
-                      className={`flex-1 inline-flex items-center justify-center gap-2 rounded-full px-4 py-3 font-semibold
+                      className={`relative flex-1 inline-flex items-center justify-center gap-2 rounded-full px-4 py-3 font-semibold
                         bg-white text-neutral-900 hover:bg-neutral-200
+                        overflow-hidden group
+                        touch-manipulation select-none
+                        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/60
+                        ${PRESS}
                         ${soldOut ? "opacity-50 cursor-not-allowed" : ""}
                       `}
                       aria-label="Add to cart"
                     >
-                      <ShoppingCart size={18} /> Add to cart
+                      <span className="relative z-10 inline-flex items-center gap-2">
+                        <ShoppingCart size={18} /> Add to cart
+                      </span>
+
+                      <span
+                        aria-hidden="true"
+                        className="pointer-events-none absolute inset-0 rounded-full
+                                  ring-2 ring-current
+                                  opacity-0 scale-x-0 origin-left
+                                  transition-[opacity,transform] duration-500 ease-out
+                                  group-hover:opacity-100 group-hover:scale-x-100
+                                  group-focus-visible:opacity-100 group-focus-visible:scale-x-100"
+                      />
                     </button>
+
                   </div>
 
                   <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-neutral-300">
