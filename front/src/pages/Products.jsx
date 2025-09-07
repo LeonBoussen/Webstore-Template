@@ -8,6 +8,7 @@ const cls = (...x) => x.filter(Boolean).join(" ");
 const percentOff = (price, discount) =>
   discount && discount < price ? Math.round(100 - (discount / price) * 100) : 0;
 const isUrl = (s) => typeof s === "string" && /^https?:\/\//i.test(s);
+const PRESS = "transition-transform duration-150 motion-reduce:transition-none motion-safe:active:scale-95";
 const withBase = (u) => (!u ? null : isUrl(u) ? u : `${API_BASE}${u.startsWith("/") ? "" : "/"}${u}`);
 const firstImageOf = (item) => {
   const raw =
@@ -146,12 +147,32 @@ const Card = ({ item, kind, onAdd }) => {
             onClick={(e) => onAdd({ ...item, kind }, e.currentTarget)}
             disabled={!!sold_out}
             className={cls(
-              "rounded-lg px-3 py-2 text-sm font-semibold transition",
-              sold_out ? "cursor-not-allowed bg-neutral-800 text-neutral-500"
-                       : "bg-white text-neutral-900 hover:bg-neutral-200"
+              // container & baseline styles
+              "relative overflow-hidden group rounded-lg px-3 py-2 text-sm font-semibold",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/60",
+              "touch-manipulation select-none",
+              PRESS, // press/tap animation
+              // enabled/disabled colors
+              sold_out
+                ? "cursor-not-allowed bg-neutral-800 text-neutral-500"
+                : "bg-white text-neutral-900 hover:bg-neutral-200"
             )}
           >
-            {sold_out ? "Unavailable" : "Add to cart"}
+            {/* keep content above the animated outline */}
+            <span className="relative z-10">
+              {sold_out ? "Unavailable" : "Add to cart"}
+            </span>
+
+            {/* smooth fade + draw outline overlay */}
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 rounded-lg
+                        ring-2 ring-current
+                        opacity-0 scale-x-0 origin-left
+                        transition-[opacity,transform] duration-500 ease-out
+                        group-hover:opacity-100 group-hover:scale-x-100
+                        group-focus-visible:opacity-100 group-focus-visible:scale-x-100"
+            />
           </button>
         </div>
       </div>

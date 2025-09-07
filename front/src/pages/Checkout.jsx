@@ -1,5 +1,5 @@
 // /src/pages/Checkout.jsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { CreditCard, Bitcoin, Banknote, QrCode, ArrowLeft, X, Plus, Minus, ShieldCheck } from "lucide-react";
 
@@ -52,19 +52,11 @@ const firstImageOf = (item) => {
 
 // ------- Discount application (dev mode with clear placeholders) -------
 function applyDiscountDevOnly(code, amount) {
-  // DEV CODES — purely client-side for now.
-  // Replace with backend validation later at /api/discounts/validate.
   const c = (code || "").trim().toUpperCase();
   if (!c) return { ok: false, reason: "No code entered" };
-
-  // Examples:
-  //   DEV10  -> 10% off
-  //   SAVE5  -> €5 fixed off
-  //   STUDENT15 -> 15% off
   if (c === "DEV10")       return { ok: true, type: "percent", value: 10, code: c };
   if (c === "STUDENT15")  return { ok: true, type: "percent", value: 15, code: c };
   if (c === "SAVE5")      return { ok: true, type: "fixed", value: 5,  code: c };
-
   return { ok: false, reason: "Unknown or inactive code (dev-only)" };
 }
 
@@ -89,6 +81,12 @@ export default function Checkout() {
 
   const [placing, setPlacing] = useState(false);
   const [toast, setToast] = useState("");
+
+  // PayPal sdk/config
+  const [ppConfig, setPpConfig] = useState(null);
+  const paypalDivRef = useRef(null);
+  const paypalSdkLoadedRef = useRef(false);
+  const lastSdkKeyRef = useRef("");
 
   // Load profile if logged in
   useEffect(() => {
@@ -121,10 +119,6 @@ export default function Checkout() {
 
   const onApplyPromo = async () => {
     setPromoMsg("");
-    // If you add backend later, try it first:
-    // const r = await fetch(`${API_BASE}/api/discounts/validate?code=${encodeURIComponent(promoInput)}`);
-    // if (r.ok) { const d = await r.json(); setPromo(d); setPromoMsg("Discount applied"); return; }
-
     const res = applyDiscountDevOnly(promoInput, subTotal);
     if (res.ok) {
       setPromo({ code: res.code, type: res.type, value: res.value });
@@ -141,13 +135,129 @@ export default function Checkout() {
     setPromoMsg("");
   };
 
+  // ---- PayPal: fetch config when selected ----
+  useEffect(() => {
+    let stop = false;
+    async function fetchCfg() {
+      if (method !== "paypal") return;
+      try {
+        const r = await fetch(`${API_BASE}/api/paypal/config`);
+        const data = await r.json();
+        if (!r.ok) throw new Error(data?.error || "Failed to load PayPal config");
+        if (!stop) setPpConfig(data);
+      } catch (e) {
+        setToast("PayPal config error");
+      }
+    }
+    fetchCfg();
+    return () => { stop = true; };
+  }, [method]);
+
+  // ---- PayPal: load SDK & render buttons whenever (method=paypal) and inputs change ----
+  useEffect(() => {
+    if (method !== "paypal") return;
+
+    if (!ppConfig?.client_id) return;
+    const key = `${ppConfig.client_id}|${ppConfig.currency || "EUR"}`;
+
+    // If SDK for same client/currency already loaded, just render buttons
+    const needReload = lastSdkKeyRef.current !== key;
+    lastSdkKeyRef.current = key;
+
+    const renderButtons = () => {
+      if (!window.paypal || !paypalDivRef.current) return;
+
+      // clear previous buttons
+      paypalDivRef.current.innerHTML = "";
+
+      window.paypal.Buttons({
+        style: { layout: "vertical" },
+        createOrder: async () => {
+          // Server creates order based on true server-side computed totals
+          const payload = {
+            items: items.map(it => ({ id: it.id, kind: it.kind, qty: it.qty || 1 })),
+            discount_code: promo?.code || null
+          };
+          const res = await fetch(`${API_BASE}/api/paypal/create-order`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = await res.json();
+          if (!res.ok || !data?.id) {
+            throw new Error(data?.error || "Failed to create order");
+          }
+          return data.id;
+        },
+        onApprove: async (data) => {
+          const res = await fetch(`${API_BASE}/api/paypal/capture-order`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ order_id: data.orderID }),
+          });
+          const out = await res.json();
+          if (!res.ok || !out?.ok) {
+            setToast("PayPal capture failed");
+            return;
+          }
+          // success
+          setToast("Payment completed");
+          // (optional: you can POST an /api/orders here to persist)
+          clear();
+          setTimeout(() => nav("/account"), 800);
+        },
+        onError: (err) => {
+          console.error(err);
+          setToast("PayPal error");
+        }
+      }).render(paypalDivRef.current);
+    };
+
+    const loadSdk = () => {
+      // If already loaded for this key, just render
+      if (paypalSdkLoadedRef.current && !needReload && window.paypal) {
+        renderButtons();
+        return;
+      }
+
+      // Remove any previous SDK script if switching config
+      const prev = document.getElementById("paypal-sdk");
+      if (prev) prev.remove();
+
+      // Create script
+      const s = document.createElement("script");
+      s.id = "paypal-sdk";
+      const params = new URLSearchParams({
+        "client-id": ppConfig.client_id,
+        currency: (ppConfig.currency || "EUR"),
+        components: "buttons"
+      });
+      s.src = `https://www.paypal.com/sdk/js?${params.toString()}`;
+      s.onload = () => {
+        paypalSdkLoadedRef.current = true;
+        renderButtons();
+      };
+      s.onerror = () => setToast("Failed to load PayPal");
+      document.body.appendChild(s);
+    };
+
+    loadSdk();
+    // re-render buttons when items/discount change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [method, ppConfig, JSON.stringify(items), promo?.code]);
+
   const placeOrder = async () => {
     if (!items.length) { setToast("Your cart is empty"); return; }
     if (!email.trim()) { setToast("Please enter an email"); return; }
 
+    if (method === "paypal") {
+      // PayPal flow is handled by the PayPal Buttons.
+      setToast("Use the PayPal button to pay.");
+      return;
+    }
+
     setPlacing(true);
     try {
-      // Build a normalized order payload ready for server usage
       const payload = {
         customer: { email, address },
         items: items.map(it => ({
@@ -168,14 +278,9 @@ export default function Checkout() {
         }
       };
 
-      // Later: POST to /api/orders and receive server-side payment intents/links
-      // const r = await fetch(`${API_BASE}/api/orders`, { method: "POST", headers: { "Content-Type":"application/json", ...auth }, body: JSON.stringify(payload) });
-      // const data = await r.json(); // contains payment URL or client_secret etc...
-      // handle redirection/intents by method...
-
       console.log("[DEV] Order payload", payload);
 
-      // For now: simulate success and clear cart
+      // For non-PayPal methods we still simulate:
       clear();
       setToast("Order created (dev). Integrate payment next.");
       setTimeout(() => nav("/account"), 800);
@@ -223,9 +328,8 @@ export default function Checkout() {
               <div className="mt-3 grid sm:grid-cols-2 gap-3">
                 {[
                   { id: "stripe", label: "Stripe (recommended)", icon: <CreditCard size={16}/> },
-                  { id: "paypal", label: "PayPal", icon: <Banknote size={16}/> },
+                  { id: "paypal", label: "PayPal & Credit/Debit card", icon: <Banknote size={16}/> },
                   { id: "ideal",  label: "iDEAL", icon: <QrCode size={16}/> },
-                  { id: "card",   label: "Credit/Debit card", icon: <CreditCard size={16}/> },
                   { id: "crypto", label: "Crypto", icon: <Bitcoin size={16}/> },
                 ].map(opt => (
                   <button
@@ -270,6 +374,16 @@ export default function Checkout() {
                 </div>
               )}
             </section>
+
+            {method === "paypal" && (
+              <section className="rounded-2xl border border-white/10 bg-neutral-900/60 p-6 backdrop-blur">
+                <h2 className="text-lg font-semibold mb-3">Pay with PayPal</h2>
+                <div ref={paypalDivRef} id="paypal-buttons" />
+                <div className="mt-2 text-xs text-neutral-400">
+                  After approval, we’ll capture the payment and finalize your order automatically.
+                </div>
+              </section>
+            )}
 
             <section className="rounded-2xl border border-white/10 bg-neutral-900/60 p-6 backdrop-blur">
               <h2 className="text-lg font-semibold">Discount code</h2>
@@ -355,20 +469,24 @@ export default function Checkout() {
                 </div>
               </div>
 
-              <button
-                disabled={!items.length || placing}
-                onClick={placeOrder}
-                className={cls(
-                  "mt-4 w-full rounded-lg bg-white text-neutral-900 font-semibold py-2 hover:bg-neutral-200",
-                  (!items.length || placing) && "opacity-60 cursor-not-allowed"
-                )}
-              >
-                {placing ? "Preparing…" : "Place order"}
-              </button>
-
-              <div className="mt-3 text-xs text-neutral-400">
-                Payments are not integrated yet. Clicking “Place order” creates the payload and simulates success.
-              </div>
+              {/* For non-PayPal methods we keep the old button */}
+              {method !== "paypal" && (
+                <>
+                  <button
+                    disabled={!items.length || placing}
+                    onClick={placeOrder}
+                    className={cls(
+                      "mt-4 w-full rounded-lg bg-white text-neutral-900 font-semibold py-2 hover:bg-neutral-200",
+                      (!items.length || placing) && "opacity-60 cursor-not-allowed"
+                    )}
+                  >
+                    {placing ? "Preparing…" : "Place order"}
+                  </button>
+                  <div className="mt-3 text-xs text-neutral-400">
+                    Payments are not integrated yet for this method. Clicking “Place order” creates the payload and simulates success.
+                  </div>
+                </>
+              )}
             </div>
           </aside>
         </div>
