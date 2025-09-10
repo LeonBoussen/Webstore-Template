@@ -1165,6 +1165,30 @@ def uploaded_file(filename):
     log(f"Serving uploaded file: {filename}", "INFO")
     return send_from_directory(UPLOAD_DIR, filename)
 
+@app.route('/api/contact', methods=['POST'])
+def contact_submit():
+    data = request.get_json(force=True, silent=True) or {}
+    name = (data.get("name") or "").strip()
+    email = (data.get("email") or "").strip().lower()
+    message = (data.get("message") or "").strip()
+
+    if not name or not email or not message:
+        return jsonify({"error": "All fields are required"}), 400
+
+    try:
+        conn = db()
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO contact_messages (name, email, message) VALUES (?, ?, ?)",
+            (name, email, message),
+        )
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True, "msg": f"Message stored: {name, email, message}"}), 201
+    except Exception as e:
+        return jsonify({"error": f"Failed to save message: {e}"}), 500
+    
+
 if __name__ == '__main__':
     while True:
         try:
