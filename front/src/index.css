@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@plugin "@tailwindcss/typography";
+
 @keyframes spin {
   to {
     transform: rotate(360deg);

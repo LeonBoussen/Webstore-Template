@@ -4,6 +4,10 @@ import {
   Plus, Minus, ShoppingCart, Zap, ShieldCheck, Truck, RefreshCcw,
   ChevronLeft, ChevronRight, Star
 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
+
 
 const API_BASE = "http://127.0.0.1:5000";
 const fmt = new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" });
@@ -111,7 +115,7 @@ const Gallery = ({ images = [], alt = "" }) => {
           key={images[i]}
           src={images[i]}
           alt={alt}
-          className="h-full w-full object-cover transition-transform duration-500"
+          className="h-full w-full object-contain transition-transform duration-500 bg-neutral-900"
           loading="eager"
           decoding="async"
         />
@@ -149,7 +153,7 @@ const Gallery = ({ images = [], alt = "" }) => {
                 }`}
                 aria-label={`Image ${idx + 1}`}
               >
-                <img src={src} alt="" className="h-full w-full object-cover" />
+                <img src={src} alt="" className="h-full w-full object-contain bg-neutral-900" />
               </button>
             ))}
           </div>
@@ -290,7 +294,9 @@ export default function ProductDetails() {
                 </div>
 
                 {product.bio && (
-                  <p className="mt-3 text-sm text-neutral-300">{product.bio}</p>
+                  <div className="mt-3 text-sm text-neutral-300 prose prose-invert">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{product.bio}</ReactMarkdown>
+                  </div>
                 )}
 
                 <div className="mt-6 space-y-3">
@@ -404,19 +410,6 @@ export default function ProductDetails() {
                   </div>
                 </div>
               </div>
-
-              <section className="mt-6 rounded-2xl border border-white/10 bg-neutral-900/40 p-6">
-                <h2 className="text-lg font-semibold">Details</h2>
-                {product.description ? (
-                  <p className="mt-2 text-sm text-neutral-300 whitespace-pre-line">
-                    {product.description}
-                  </p>
-                ) : (
-                  <p className="mt-2 text-sm text-neutral-400">
-                    Built with performance, privacy, and reliability in mind.
-                  </p>
-                )}
-              </section>
             </aside>
           </div>
         ) : null}

@@ -1,6 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Minus, Trash2, ShoppingCart, X } from "lucide-react";
 import { Link } from "react-router-dom";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
+
 
 const API_BASE = "http://127.0.0.1:5000";
 const fmt = new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" });
@@ -140,7 +144,11 @@ const Card = ({ item, kind, onAdd }) => {
             ))}
           </div>
         </div>
-        {bio && <p className="text-sm text-neutral-300 max-h-12 overflow-hidden">{bio}</p>}
+        {bio && (
+          <div className="text-sm text-neutral-300 max-h-12 overflow-hidden prose prose-invert">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{bio}</ReactMarkdown>
+          </div>
+        )}
         <div className="mt-2 flex items-center justify-between">
           <Price price={price} discount={discount_price} />
           <button
