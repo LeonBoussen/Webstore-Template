@@ -53,6 +53,17 @@ def create_or_update_db_table():
             )
         ''')
 
+        # Contact form submissions
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS contact_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                email TEXT NOT NULL,
+                message TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+        ''')
+
         # Users: fairly standard auth + some profile data
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (

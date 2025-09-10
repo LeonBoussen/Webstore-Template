@@ -10,9 +10,22 @@ export default function Contact() {
 
   const submit = async (e) => {
     e.preventDefault();
-    // TODO: connect to backend endpoint like /api/contact
-    setMsg("✅ Message sent! We'll get back to you soon.");
-    setForm({ name: "", email: "", message: "" });
+    try {
+      const res = await fetch("http://127.0.0.1:5000/api/contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMsg("✅ Message sent! We'll get back to you soon.");
+        setForm({ name: "", email: "", message: "" });
+      } else {
+        setMsg("❌ " + (data.error || "Failed to send message"));
+      }
+    } catch (err) {
+      setMsg("❌ Network error");
+    }
   };
 
   return (
