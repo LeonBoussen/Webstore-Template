@@ -939,6 +939,126 @@ def products_create():
         conn.close()
         log("Database connection closed for product creation", "INFO")
 
+@app.route('/api/products/<int:pid>/variants', methods=['GET'])
+@require_admin
+def variants_list(pid):
+    with db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, name, attributes_json, price_delta, active, sort_order
+            FROM product_variants
+            WHERE product_id=?
+            ORDER BY sort_order ASC, id ASC
+        """, (pid,))
+        rows = cur.fetchall()
+        # Fetch images for each variant
+        out = []
+        for (vid, name, attrs, price_delta, active, sort_order) in rows:
+            imgs = [r[0] for r in cur.execute("""
+                SELECT image_path FROM product_variant_images
+                WHERE variant_id=? ORDER BY sort_order ASC, id ASC
+            """, (vid,)).fetchall()]
+            out.append({
+                "id": vid,
+                "name": name,
+                "attributes": json.loads(attrs or "{}"),
+                "price_delta": price_delta,
+                "active": int(active),
+                "sort_order": sort_order,
+                "images": imgs
+            })
+        return jsonify(out)
+
+@app.route('/api/products/<int:pid>/variants', methods=['POST'])
+@require_admin
+def variants_create(pid):
+    data = request.get_json(force=True) or {}
+    name = data.get("name")
+    attributes = data.get("attributes") or {}  # dict {"Color":"Black",...}
+    price_delta = float(data.get("price_delta") or 0)
+    active = 1 if data.get("active", 1) else 0
+    sort_order = int(data.get("sort_order") or 0)
+    images = data.get("images") or []  # array of rel paths from /api/upload/image
+
+    if not isinstance(attributes, dict):
+        return jsonify({"error": "attributes must be an object"}), 400
+
+    with db() as conn:
+        conn.execute("PRAGMA foreign_keys=ON")
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO product_variants (product_id, name, attributes_json, price_delta, active, sort_order)
+            VALUES (?,?,?,?,?,?)
+        """, (pid, name, json.dumps(attributes, separators=(",",":")), price_delta, active, sort_order))
+        vid = cur.lastrowid
+        if images:
+            cur.executemany("""
+                INSERT INTO product_variant_images(variant_id, image_path, alt_text, sort_order)
+                VALUES (?,?,NULL,?)
+            """, [(vid, path, i) for i, path in enumerate(images)])
+        conn.commit()
+        return jsonify({"id": vid}), 201
+
+@app.route('/api/variants/<int:vid>', methods=['PUT'])
+@require_admin
+def variants_update(vid):
+    data = request.get_json(force=True) or {}
+    fields, vals = [], []
+
+    if "name" in data:
+        fields.append("name=?")
+        vals.append(data["name"])
+
+    if "price_delta" in data:
+        fields.append("price_delta=?")
+        vals.append(float(data.get("price_delta") or 0))
+
+    if "active" in data:
+        fields.append("active=?")
+        vals.append(1 if data.get("active") else 0)
+
+    if "sort_order" in data:
+        fields.append("sort_order=?")
+        vals.append(int(data.get("sort_order") or 0))
+
+    if "attributes" in data:
+        attrs = data.get("attributes") or {}
+        if not isinstance(attrs, dict):
+            return jsonify({"error": "attributes must be an object"}), 400
+        fields.append("attributes_json=?")
+        vals.append(json.dumps(attrs, separators=(",", ":")))
+        replace_images = data.get("images") if "images" in data else None
+
+    if not fields and replace_images is None:
+        return jsonify({"error": "no fields to update"}), 400
+
+    with db() as conn:
+        conn.execute("PRAGMA foreign_keys=ON")
+        cur = conn.cursor()
+        if fields:
+            vals.append(vid)
+            cur.execute(f"UPDATE product_variants SET {', '.join(fields)} WHERE id=?", vals)
+        if replace_images is not None:
+            cur.execute("DELETE FROM product_variant_images WHERE variant_id=?", (vid,))
+            if replace_images:
+                cur.executemany("""
+                    INSERT INTO product_variant_images(variant_id, image_path, alt_text, sort_order)
+                    VALUES (?,?,NULL,?)
+                """, [(vid, p, i) for i, p in enumerate(replace_images)])
+        conn.commit()
+        return jsonify({"ok": True})
+
+@app.route('/api/variants/<int:vid>', methods=['DELETE'])
+@require_admin
+def variants_delete(vid):
+    with db() as conn:
+        conn.execute("PRAGMA foreign_keys=ON")
+        cur = conn.cursor()
+        cur.execute("DELETE FROM product_variants WHERE id=?", (vid,))
+        conn.commit()
+        return jsonify({"ok": True})
+
+
 @app.route('/api/products/<int:pid>', methods=['PUT'])
 @require_admin
 def products_update(pid):

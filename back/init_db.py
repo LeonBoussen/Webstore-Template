@@ -15,6 +15,7 @@ def table_exists(cursor, table_name: str) -> bool:
 
 def column_exists(cursor, table_name: str, column_name: str) -> bool:
     """Check if a given column exists in a table."""
+    # Note: table_name is static in our calls; PRAGMA doesn't support parameters.
     cursor.execute(f"PRAGMA table_info({table_name})")
     return any(row[1] == column_name for row in cursor.fetchall())
 
@@ -26,8 +27,10 @@ def create_or_update_db_table():
         conn.execute("PRAGMA foreign_keys = ON;")
         cursor = conn.cursor()
 
-        # MAIN TABLES (latest schema)
-        # Products: image_path is gone, images live in product_images
+        # ------------------------------
+        # TABLES (latest schema)
+        # ------------------------------
+        # Products
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS products (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -41,7 +44,33 @@ def create_or_update_db_table():
             )
         ''')
 
-        # Services: same deal, image_path removed
+        # Product variants
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS product_variants (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                product_id INTEGER NOT NULL,
+                variant_name TEXT NOT NULL,
+                attributes_json TEXT NOT NULL,
+                price_delta   REAL NOT NULL DEFAULT 0,
+                active INTEGER NOT NULL DEFAULT 1,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+            )
+        ''')
+
+        # Product variant images
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS product_variant_images (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                variant_id INTEGER NOT NULL,
+                image_path TEXT NOT NULL,
+                alt_text TEXT,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (variant_id) REFERENCES product_variants(id) ON DELETE CASCADE
+            )
+        ''')
+
+        # Services
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS services (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,7 +82,7 @@ def create_or_update_db_table():
             )
         ''')
 
-        # Users: fairly standard auth + some profile data
+        # Users
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,7 +96,7 @@ def create_or_update_db_table():
             )
         ''')
 
-        # Orders + order_items: classic one-to-many
+        # Orders + order_items
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS orders (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,7 +117,7 @@ def create_or_update_db_table():
             )
         ''')
 
-        # Product images (new normalized table)
+        # Product images
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS product_images (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -99,10 +128,8 @@ def create_or_update_db_table():
                 FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
             )
         ''')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_product_images_product_id ON product_images(product_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_product_images_sort ON product_images(product_id, sort_order)')
 
-        # Service images (same idea as products)
+        # Service images
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS service_images (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,26 +141,27 @@ def create_or_update_db_table():
             )
         ''')
 
+        # Discount codes
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS discount_codes (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 code          TEXT NOT NULL UNIQUE,
                 kind          TEXT NOT NULL CHECK (kind IN ('percent','fixed')),
                 value         REAL NOT NULL CHECK (value >= 0),
-                active        INTEGER NOT NULL DEFAULT 1,               -- 1=true, 0=false
-                starts_at     TEXT,                                     -- ISO8601 or NULL
-                expires_at    TEXT,                                     -- ISO8601 or NULL
-                max_uses      INTEGER,                                  -- NULL = unlimited
+                active        INTEGER NOT NULL DEFAULT 1,
+                starts_at     TEXT,
+                expires_at    TEXT,
+                max_uses      INTEGER,
                 used_count    INTEGER NOT NULL DEFAULT 0,
-                applies_to    TEXT DEFAULT 'all',                       -- 'all' | 'product' | 'service' (extend as needed)
+                applies_to    TEXT DEFAULT 'all',
                 created_at    TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-            """)
+            )
+        """)
 
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_service_images_service_id ON service_images(service_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_service_images_sort ON service_images(service_id, sort_order)')
-
-        # Add missing columns to products if the DB was created earlier
+        # ------------------------------
+        # BACKFILLS (add missing columns in existing DBs)
+        # ------------------------------
+        # Products
         products_backfill = [
             ('products', 'bio', 'TEXT'),
             ('products', 'price', 'REAL NOT NULL DEFAULT 0'),
@@ -147,7 +175,7 @@ def create_or_update_db_table():
                 print(f"Adding column {col} to {table}")
                 cursor.execute(f'ALTER TABLE {table} ADD COLUMN {col} {definition}')
 
-        # Add missing columns to services
+        # Services
         services_backfill = [
             ('services', 'bio', 'TEXT'),
             ('services', 'discount_price', 'REAL'),
@@ -158,7 +186,7 @@ def create_or_update_db_table():
                 print(f"Adding column {col} to {table}")
                 cursor.execute(f'ALTER TABLE {table} ADD COLUMN {col} {definition}')
 
-        # Add missing columns to users
+        # Users
         users_backfill = [
             ('users', 'preferred_payment', 'TEXT'),
             ('users', 'phone', 'TEXT'),
@@ -169,6 +197,22 @@ def create_or_update_db_table():
                 print(f"Adding column {col} to {table}")
                 cursor.execute(f'ALTER TABLE {table} ADD COLUMN {col} {definition}')
 
+        # Images / Variants: ensure sort_order exists before we touch it or index it
+        images_variants_backfill = [
+            # table, column, definition (match your CREATE TABLE definitions)
+            ('product_images', 'sort_order', 'INTEGER DEFAULT 0'),
+            ('service_images', 'sort_order', 'INTEGER DEFAULT 0'),
+            ('product_variants', 'sort_order', 'INTEGER NOT NULL DEFAULT 0'),
+            ('product_variant_images', 'sort_order', 'INTEGER NOT NULL DEFAULT 0'),
+        ]
+        for table, col, definition in images_variants_backfill:
+            if table_exists(cursor, table) and not column_exists(cursor, table, col):
+                print(f"Adding column {col} to {table}")
+                cursor.execute(f'ALTER TABLE {table} ADD COLUMN {col} {definition}')
+
+        # ------------------------------
+        # LEGACY MIGRATIONS (after backfills)
+        # ------------------------------
         # Move legacy product.image_path into product_images
         if column_exists(cursor, 'products', 'image_path'):
             print("Migrating products.image_path to product_images...")
@@ -197,8 +241,26 @@ def create_or_update_db_table():
                   )
             ''')
 
-        conn.commit()
+        # ------------------------------
+        # INDEXES (create AFTER columns are ensured)
+        # ------------------------------
+        # product_variants
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_product_variants_product_id ON product_variants(product_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_product_variants_sort ON product_variants(product_id, sort_order)')
 
+        # product_variant_images
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_variant_images_variant_id ON product_variant_images(variant_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_variant_images_sort ON product_variant_images(variant_id, sort_order)')
+
+        # product_images
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_product_images_product_id ON product_images(product_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_product_images_sort ON product_images(product_id, sort_order)')
+
+        # service_images
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_service_images_service_id ON service_images(service_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_service_images_sort ON service_images(service_id, sort_order)')
+
+        conn.commit()
     finally:
         conn.close()
 
