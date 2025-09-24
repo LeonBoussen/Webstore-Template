@@ -75,14 +75,20 @@ export default function Admin() {
       api.get('/api/products'),
       api.get('/api/services'),
     ]);
-    // Expect server to provide .images (array) and legacy .image_url (string)
+    // Get full product details (including images array) for every product in parallel
+    const productsDetails = await Promise.all(
+      (p.data || []).map(prod => api.get(`/api/products/${prod.id}`).then(res => res.data))
+    );
+    setProducts(productsDetails);
+
+    // Optionally do same for services if they can have multiple images
+    // Otherwise keep as before:
     const coerce = (x) => ({
       ...x,
       images: Array.isArray(x.images) ? x.images : (x.image_url ? [x.image_url] : []),
       price: x.price ?? '',
       discount_price: x.discount_price ?? '',
     });
-    setProducts((p.data || []).map(coerce));
     setServices((s.data || []).map(coerce));
   }
 

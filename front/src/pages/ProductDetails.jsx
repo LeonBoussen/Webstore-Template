@@ -2,7 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useLocation, useNavigate, Link } from "react-router-dom";
 import {
   Plus, Minus, ShoppingCart, Zap, ShieldCheck, Truck, RefreshCcw,
-  ChevronLeft, ChevronRight, Star
+  ChevronLeft, ChevronRight, Star,
+  HeartCrackIcon,
+  EyeIcon,
+  InboxIcon,
+  EuroIcon
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -235,6 +239,10 @@ export default function ProductDetails() {
     navigate("/checkout");
   };
 
+  const goToCheckout = () => {
+    navigate("/checkout");
+  }
+
   return (
     <div className="bg-neutral-950 text-white min-h-screen pt-16">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(40%_25%_at_70%_0%,rgba(56,189,248,0.08),transparent_60%)]" />
@@ -391,7 +399,35 @@ export default function ProductDetails() {
                                   group-focus-visible:opacity-100 group-focus-visible:scale-x-100"
                       />
                     </button>
+                  </div>
 
+                  <div>
+                    <button
+                      onClick={goToCheckout}
+                      disabled={soldOut}
+                      className={`w-full relative inline-flex items-center justify-center gap-2 rounded-full px-4 py-3 font-semibold
+                        bg-white text-neutral-900 hover:bg-neutral-200
+                        overflow-hidden group
+                        touch-manipulation select-none
+                        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/60
+                        ${PRESS}
+                        ${soldOut ? "opacity-50 cursor-not-allowed" : ""}
+                        `}
+                      aria-label="Checkout"
+                    >
+                      <span className="relative z-10 inline-flex items-center gap-2">
+                        <EuroIcon size={18} /> Checkout
+                      </span>
+                      <span
+                        aria-hidden="true"
+                        className="pointer-events-none absolute inset-0 rounded-full
+                                  ring-2 ring-current
+                                  opacity-0 scale-x-0 origin-left
+                                  transition-[opacity,transform] duration-500 ease-out
+                                  group-hover:opacity-100 group-hover:scale-x-100
+                                  group-focus-visible:opacity-100 group-focus-visible:scale-x-100"
+                      />
+                    </button>
                   </div>
 
                   <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-neutral-300">
@@ -404,8 +440,8 @@ export default function ProductDetails() {
                       Fast delivery
                     </div>
                     <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-neutral-900/50 px-3 py-2">
-                      <RefreshCcw size={16} className="text-emerald-300" />
-                      14-day returns
+                      <InboxIcon size={16} className="text-emerald-300" />
+                      Quick support
                     </div>
                   </div>
                 </div>

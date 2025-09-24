@@ -14,6 +14,7 @@ try:
     import urllib.request
     import urllib.parse
     import ssl
+    import requests
     try:
         from PIL import Image
         PIL_AVAILABLE = True
@@ -58,6 +59,11 @@ try:
     CURRENCY = os.environ.get("CURRENCY", "EUR")
     _PAYPAL_TOKEN = None
     _PAYPAL_TOKEN_EXP = 0
+
+    # --- nowpayments config ---
+    NOWPAYMENTS_API_KEY = os.environ.get("NOWPAYMENTS_API_KEY", "")
+
+
 except ValueError as e:
     print(f"Value Error: {e}")
     input("Press Enter to exit...")
@@ -436,6 +442,13 @@ def _apply_dev_discount(subtotal: float, code: str | None) -> float:
         log(f"SAVE5 code applied: discount={discount}", "SUCCESS")
         return discount
     log(f"Unknown discount code '{c}', no discount applied", "WARNING")
+    return 0.0
+
+def get_discount(subtotal, discount_code):
+    # Use your existing discount logic!
+    c = (discount_code or "").strip().upper()
+    if c == "DEV100":
+        return round(subtotal, 2)
     return 0.0
 
 def compute_amounts(items: list, discount_code: str | None):
@@ -922,8 +935,8 @@ def products_create():
 
         if images:
             cur.executemany(
-                "INSERT INTO product_images (product_id, image_path, alt_text, sort_order) VALUES (?,?,?,?)",
-                [(new_id, p, None, i) for i, p in enumerate(images)]
+                "INSERT INTO product_images (product_id, image_path, sort_order) VALUES (?,?,?)",
+                [(new_id, p, i) for i, p in enumerate(images)]
             )
             log(f"Inserted images for product {new_id}: {images}", "SUCCESS")
         else:
@@ -992,8 +1005,8 @@ def products_update(pid):
             log(f"Deleted old images for product {pid}", "INFO")
             if replace_images:
                 cur.executemany(
-                    "INSERT INTO product_images (product_id, image_path, alt_text, sort_order) VALUES (?,?,?,?)",
-                    [(pid, p, None, i) for i, p in enumerate(replace_images)]
+                    "INSERT INTO product_images (product_id, image_path, sort_order) VALUES (?,?,?)",
+                    [(pid, p, i) for i, p in enumerate(replace_images)]
                 )
                 log(f"Inserted new images for product {pid}: {replace_images}", "SUCCESS")
             else:
@@ -1164,6 +1177,65 @@ def services_delete(sid):
 def uploaded_file(filename):
     log(f"Serving uploaded file: {filename}", "INFO")
     return send_from_directory(UPLOAD_DIR, filename)
+
+@app.route("/api/nowpayments/create-invoice", methods=["POST"])
+def nowpayments_create_invoice():
+    data = request.get_json(force=True, silent=True) or {}
+    items = data.get("items", [])
+    email = data.get("email") or ""
+    discount_code = data.get("discount_code")
+    
+    # Compute subtotal (same logic as PayPal/server calc)
+    subtotal = 0.0
+    description = []
+    
+    with db() as conn:
+        cur = conn.cursor()
+        for it in items:
+            iid = int(it.get("id"))
+            kind = it.get("kind", "").strip().lower()
+            qty = int(it.get("qty", 1))
+            # Use your get_price_for_item from server.py
+            product_info = _get_price_for_item(cur, kind, iid)
+            if not product_info:
+                return jsonify({"error": f"Item not found {kind} {iid}"}), 400
+            name, unit_price = product_info
+            subtotal += unit_price * max(1, qty)
+            description.append(f"{qty}x {name}")
+    
+    subtotal = round(subtotal, 2)
+    discount = get_discount(subtotal, discount_code)
+    
+    # Add 10% crypto fee
+    fee = round((subtotal - discount) * 0.10, 2)
+    total = max(0, round(subtotal - discount + fee, 2))
+    
+    if total <= 0:
+        return jsonify({"error": "Total must be greater than zero for crypto payment"}), 400
+
+    invoice_description = ", ".join(description)
+    
+    # NowPayments CREATE INVOICE API
+    try:
+        np_res = requests.post(
+            "https://api.nowpayments.io/v1/invoice",
+            headers={
+                "x-api-key": NOWPAYMENTS_API_KEY,
+                "Content-Type": "application/json"
+            },
+            json={
+                "price_amount": total,
+                "price_currency": "eur",
+                "order_description": invoice_description,
+                "customer_email": email
+            }
+        )
+        np_res.raise_for_status()
+        invoice = np_res.json()
+        # e.g., payment_url in invoice
+        return jsonify(invoice)
+    except Exception as e:
+        return jsonify({"error": f"Failed to create invoice with NowPayments: {str(e)}"}), 500
 
 @app.route('/api/contact', methods=['POST'])
 def contact_submit():

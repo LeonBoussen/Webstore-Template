@@ -12,6 +12,7 @@ import Admin from './pages/Admin';
 import Account from './pages/Account'
 import ProductDetails from './pages/ProductDetails';
 import Checkout from './pages/Checkout';
+import Orders from './pages/orders';
 
 function App() {
   return (
@@ -29,7 +30,7 @@ function App() {
             <Route path="/admin" element={<Admin />} />
             <Route path="/account" element={<Account />} />
             <Route path="/checkout" element={<Checkout/>} />
-
+            <Route path="/orders" element={<Orders/>} />
             <Route path="*" element={<div className="p-6">404 - This page is not here, contact the developer!</div>} />
           </Routes>
     </Router>

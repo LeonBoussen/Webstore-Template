@@ -1,16 +1,16 @@
 // /src/pages/Checkout.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { CreditCard, Bitcoin, Banknote, QrCode, ArrowLeft, X, Plus, Minus, ShieldCheck } from "lucide-react";
+import { Bitcoin, ArrowLeft, X, Plus, Minus, ShieldCheck } from "lucide-react";
 
 const API_BASE = "http://127.0.0.1:5000";
 const fmt = new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" });
 const cls = (...x) => x.filter(Boolean).join(" ");
-
 const isUrl = (s) => typeof s === "string" && /^https?:\/\//i.test(s);
-const withBase = (u) => (!u ? null : isUrl(u) ? u : `${API_BASE}${u.startsWith("/") ? "" : "/"}${u}`);
+const withBase = (u) =>
+  !u ? null : isUrl(u) ? u : `${API_BASE}${u.startsWith("/") ? "" : "/"}${u}`;
 
-// ------- Local cart helper (matches your Products.jsx behavior) -------
+// ------- Local cart helper -------
 function useLocalCart() {
   const read = () => {
     try { return JSON.parse(localStorage.getItem("cart") || "[]"); } catch { return []; }
@@ -37,7 +37,10 @@ function useLocalCart() {
   const remove = (id, kind) => save(items.filter(it => !(it.id === id && it.kind === kind)));
   const clear = () => save([]);
 
-  const subTotal = items.reduce((sum, it) => sum + ((it.discount_price ?? it.price) || 0) * (it.qty || 1), 0);
+  const subTotal = items.reduce(
+    (sum, it) => sum + ((it.discount_price ?? it.price) || 0) * (it.qty || 1),
+    0
+  );
   return { items, inc, dec, remove, clear, subTotal };
 }
 
@@ -54,16 +57,43 @@ const firstImageOf = (item) => {
 function applyDiscountDevOnly(code, amount) {
   const c = (code || "").trim().toUpperCase();
   if (!c) return { ok: false, reason: "No code entered" };
-  if (c === "DEV10")       return { ok: true, type: "percent", value: 10, code: c };
-  if (c === "STUDENT15")  return { ok: true, type: "percent", value: 15, code: c };
-  if (c === "SAVE5")      return { ok: true, type: "fixed", value: 5,  code: c };
-  return { ok: false, reason: "Unknown or inactive code (dev-only)" };
+  if (c === "DEV100") return { ok: true, type: "percent", value: 100, code: c };
+  return {
+    ok: false,
+    reason: "Unknown or inactive code client side korting fix dat dit backend gefixed worden"
+  };
+}
+
+// --- NOWPayments Integration example ---
+async function createNowPaymentsInvoice({ items, promo, email }) {
+  // Compute total (including discount)
+  let subTotal = items.reduce((sum, it) => sum + ((it.discount_price ?? it.price) || 0) * (it.qty || 1), 0);
+  let discount = 0;
+  if (promo?.type === "percent") discount = (subTotal * promo.value) / 100;
+  if (promo?.type === "fixed") discount = promo.value;
+  const total = Math.max(0, subTotal - discount);
+
+  // Description for invoice
+  const description = items.map(it => `${it.qty}x ${it.name}`).join(", ");
+
+  // Call local backend, which performs NowPayments invoice creation for security
+  const res = await fetch(`${API_BASE}/api/nowpayments/create-invoice`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      amount: total,
+      currency: "eur",
+      email,
+      description,
+    }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return await res.json(); // Should include payment_url or invoice info.
 }
 
 export default function Checkout() {
   const nav = useNavigate();
   const token = localStorage.getItem("userToken");
-  const auth = token ? { Authorization: `Bearer ${token}`, "Content-Type": "application/json" } : {};
   const { items, inc, dec, remove, clear, subTotal } = useLocalCart();
 
   // customer details (pre-fill from profile if logged in)
@@ -76,7 +106,7 @@ export default function Checkout() {
   const [promoMsg, setPromoMsg] = useState("");
 
   // payments
-  const [method, setMethod] = useState("stripe"); // stripe | paypal | ideal | card | crypto
+  const [method, setMethod] = useState("paypal"); // paypal | crypto
   const [crypto, setCrypto] = useState("btc");     // btc | xmr
 
   const [placing, setPlacing] = useState(false);
@@ -122,7 +152,7 @@ export default function Checkout() {
     const res = applyDiscountDevOnly(promoInput, subTotal);
     if (res.ok) {
       setPromo({ code: res.code, type: res.type, value: res.value });
-      setPromoMsg("Discount applied (dev mode)");
+      setPromoMsg("Discount applied");
     } else {
       setPromo(null);
       setPromoMsg(res.reason || "Invalid code");
@@ -156,24 +186,17 @@ export default function Checkout() {
   // ---- PayPal: load SDK & render buttons whenever (method=paypal) and inputs change ----
   useEffect(() => {
     if (method !== "paypal") return;
-
     if (!ppConfig?.client_id) return;
     const key = `${ppConfig.client_id}|${ppConfig.currency || "EUR"}`;
-
-    // If SDK for same client/currency already loaded, just render buttons
     const needReload = lastSdkKeyRef.current !== key;
     lastSdkKeyRef.current = key;
 
     const renderButtons = () => {
       if (!window.paypal || !paypalDivRef.current) return;
-
-      // clear previous buttons
       paypalDivRef.current.innerHTML = "";
-
       window.paypal.Buttons({
         style: { layout: "vertical" },
         createOrder: async () => {
-          // Server creates order based on true server-side computed totals
           const payload = {
             items: items.map(it => ({ id: it.id, kind: it.kind, qty: it.qty || 1 })),
             discount_code: promo?.code || null
@@ -200,31 +223,24 @@ export default function Checkout() {
             setToast("PayPal capture failed");
             return;
           }
-          // success
           setToast("Payment completed");
-          // (optional: you can POST an /api/orders here to persist)
           clear();
           setTimeout(() => nav("/account"), 800);
         },
         onError: (err) => {
-          console.error(err);
           setToast("PayPal error");
         }
       }).render(paypalDivRef.current);
     };
 
     const loadSdk = () => {
-      // If already loaded for this key, just render
       if (paypalSdkLoadedRef.current && !needReload && window.paypal) {
         renderButtons();
         return;
       }
-
-      // Remove any previous SDK script if switching config
       const prev = document.getElementById("paypal-sdk");
       if (prev) prev.remove();
 
-      // Create script
       const s = document.createElement("script");
       s.id = "paypal-sdk";
       const params = new URLSearchParams({
@@ -242,50 +258,22 @@ export default function Checkout() {
     };
 
     loadSdk();
-    // re-render buttons when items/discount change
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [method, ppConfig, JSON.stringify(items), promo?.code]);
+  }, [method, ppConfig, JSON.stringify(items), promo?.code, nav, clear]);
 
-  const placeOrder = async () => {
-    if (!items.length) { setToast("Your cart is empty"); return; }
-    if (!email.trim()) { setToast("Please enter an email"); return; }
-
-    if (method === "paypal") {
-      // PayPal flow is handled by the PayPal Buttons.
-      setToast("Use the PayPal button to pay.");
+  // --- NowPayments payment handler ---
+  const payWithCrypto = async () => {
+    if (!items.length || !email.trim()) {
+      setToast("Cart and email required");
       return;
     }
-
     setPlacing(true);
     try {
-      const payload = {
-        customer: { email, address },
-        items: items.map(it => ({
-          id: it.id, kind: it.kind, name: it.name,
-          unit_price: (it.discount_price ?? it.price) || 0,
-          qty: it.qty || 1,
-          image_url: it.image_url ?? firstImageOf(it)
-        })),
-        amounts: {
-          subtotal: subTotal,
-          discount: discountAmount,
-          total
-        },
-        discount_code: promo?.code || null,
-        payment: {
-          method,
-          crypto: method === "crypto" ? crypto : null
-        }
-      };
-
-      console.log("[DEV] Order payload", payload);
-
-      // For non-PayPal methods we still simulate:
+      const invoice = await createNowPaymentsInvoice({ items, promo, email });
+      setToast("Redirecting for crypto payment...");
       clear();
-      setToast("Order created (dev). Integrate payment next.");
-      setTimeout(() => nav("/account"), 800);
+      window.location.href = invoice.payment_url;
     } catch (e) {
-      setToast("Failed to create order");
+      setToast(`Crypto payment error: ${e.message}`);
     } finally {
       setPlacing(false);
     }
@@ -325,12 +313,10 @@ export default function Checkout() {
 
             <section className="rounded-2xl border border-white/10 bg-neutral-900/60 p-6 backdrop-blur">
               <h2 className="text-lg font-semibold">Payment method</h2>
-              <div className="mt-3 grid sm:grid-cols-2 gap-3">
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {[
-                  { id: "stripe", label: "Stripe (recommended)", icon: <CreditCard size={16}/> },
-                  { id: "paypal", label: "PayPal & Credit/Debit card", icon: <Banknote size={16}/> },
-                  { id: "ideal",  label: "iDEAL", icon: <QrCode size={16}/> },
-                  { id: "crypto", label: "Crypto", icon: <Bitcoin size={16}/> },
+                  { id: "paypal", label: "PayPal", icon: <Bitcoin size={16}/> },
+                  { id: "crypto", label: "Crypto (NowPayments)", icon: <Bitcoin size={16}/> },
                 ].map(opt => (
                   <button
                     key={opt.id}
@@ -347,32 +333,6 @@ export default function Checkout() {
                   </button>
                 ))}
               </div>
-
-              {method === "crypto" && (
-                <div className="mt-4">
-                  <div className="text-sm text-neutral-300 mb-2">Choose currency</div>
-                  <div className="inline-flex rounded-lg border border-white/10 bg-neutral-900/60 p-1">
-                    {[
-                      { id: "btc", label: "Bitcoin" },
-                      { id: "xmr", label: "Monero" },
-                    ].map(c => (
-                      <button
-                        key={c.id}
-                        onClick={() => setCrypto(c.id)}
-                        className={cls(
-                          "px-3 py-1.5 text-sm font-medium rounded-md transition",
-                          crypto === c.id ? "bg-white text-neutral-900" : "text-neutral-300 hover:text-white"
-                        )}
-                      >
-                        {c.label}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="mt-2 text-xs text-neutral-400">
-                    You’ll generate an address / QR after order creation (to be integrated).
-                  </div>
-                </div>
-              )}
             </section>
 
             {method === "paypal" && (
@@ -385,12 +345,33 @@ export default function Checkout() {
               </section>
             )}
 
+            {method === "crypto" && (
+              <section className="rounded-2xl border border-white/10 bg-neutral-900/60 p-6 backdrop-blur">
+                <h2 className="text-lg font-semibold mb-3">Pay with Crypto (NowPayments)</h2>
+                <div className="mt-3 space-y-2">
+                  <button
+                    className={cls(
+                      "w-full rounded-lg bg-cyan-400 text-neutral-900 font-semibold py-2 hover:bg-cyan-300",
+                      (!items.length || placing || !email.trim()) && "opacity-60 cursor-not-allowed"
+                    )}
+                    disabled={!items.length || placing || !email.trim()}
+                    onClick={payWithCrypto}
+                  >
+                    {placing ? "Redirecting…" : "Continue to payment"}
+                  </button>
+                  <div className="text-xs text-neutral-400">
+                    You will be redirected to NowPayments to complete payment. Invoice is for total after discount.
+                  </div>
+                </div>
+              </section>
+            )}
+
             <section className="rounded-2xl border border-white/10 bg-neutral-900/60 p-6 backdrop-blur">
               <h2 className="text-lg font-semibold">Discount code</h2>
               <div className="mt-3 flex gap-2 items-center">
                 <input
                   className="flex-1 rounded-lg bg-neutral-800 border border-white/10 px-3 py-2 text-sm"
-                  placeholder="Enter code (e.g., DEV10, SAVE5, STUDENT15)"
+                  placeholder="Enter code (e.g., DEV100)"
                   value={promoInput} onChange={e => setPromoInput(e.target.value)}
                 />
                 {promo ? (
@@ -468,25 +449,6 @@ export default function Checkout() {
                   <span>{fmt.format(total)}</span>
                 </div>
               </div>
-
-              {/* For non-PayPal methods we keep the old button */}
-              {method !== "paypal" && (
-                <>
-                  <button
-                    disabled={!items.length || placing}
-                    onClick={placeOrder}
-                    className={cls(
-                      "mt-4 w-full rounded-lg bg-white text-neutral-900 font-semibold py-2 hover:bg-neutral-200",
-                      (!items.length || placing) && "opacity-60 cursor-not-allowed"
-                    )}
-                  >
-                    {placing ? "Preparing…" : "Place order"}
-                  </button>
-                  <div className="mt-3 text-xs text-neutral-400">
-                    Payments are not integrated yet for this method. Clicking “Place order” creates the payload and simulates success.
-                  </div>
-                </>
-              )}
             </div>
           </aside>
         </div>
