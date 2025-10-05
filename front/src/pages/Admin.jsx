@@ -44,6 +44,7 @@ export default function Admin() {
   const [tab, setTab] = useState('products');
   const [products, setProducts] = useState([]);
   const [services, setServices] = useState([]);
+  const [discount, setDiscounts] = useState([])
   const [draftP, setDraftP] = useState(createDraft('product'));
   const [draftS, setDraftS] = useState(createDraft('service'));
   const [busy, setBusy] = useState(false);
@@ -57,8 +58,9 @@ export default function Admin() {
         const meRes = await fetch(`${API_BASE}/api/auth/me`, { headers });
         if (!meRes.ok) throw new Error('me failed');
         const me = await meRes.json();
-        if (alive) setAllowed(me.username === 'LeonBoussen');
-        if (alive && me.username !== 'LeonBoussen') setMsg('Admin access is restricted.');
+        if (alive) setAllowed(me.is_admin == 1); // assuming is_admin is returned from backend
+        if (alive && !me.is_admin) setMsg('Admin access is restricted.');
+
       } catch (e) {
         if (!alive) return;
         setAllowed(false);
@@ -81,8 +83,6 @@ export default function Admin() {
     );
     setProducts(productsDetails);
 
-    // Optionally do same for services if they can have multiple images
-    // Otherwise keep as before:
     const coerce = (x) => ({
       ...x,
       images: Array.isArray(x.images) ? x.images : (x.image_url ? [x.image_url] : []),
@@ -90,13 +90,16 @@ export default function Admin() {
       discount_price: x.discount_price ?? '',
     });
     setServices((s.data || []).map(coerce));
+
+    const d = await api.get('/api/discount');
+    setDiscounts(d.data)
   }
 
   // --- Upload one file (reuses /api/upload/image); call many times for multiple files ---
   async function uploadOne(file) {
     const form = new FormData();
     form.append('image', file);
-    const { data } = await api.post('/api/upload/image', form, { headers: { ...headers, 'Content-Type': 'multipart/form-data' } });
+    const { data } = await api.post('/api/upload/image', form, { headers });
     return data.image_url; // relative path
   }
 
@@ -151,16 +154,33 @@ export default function Admin() {
       try {
         const payload = normalizeOut(item);
         if (!payload.name || payload.price == null) {
-          setError('Name and valid price are required'); setSaving(false); return;
+          setError('Name and valid price are required'); 
+          setSaving(false); 
+          return;
         }
+        
+        // Fix the logic structure
         if (type === 'product') {
-          if (payload.id) await api.put(`/api/products/${payload.id}`, payload, { headers });
-          else await api.post('/api/products', payload, { headers });
-        } else {
-          if (payload.id) await api.put(`/api/services/${payload.id}`, payload, { headers });
-          else await api.post('/api/services', payload, { headers });
+          if (payload.id) {
+            await api.put(`/api/products/${payload.id}`, payload, { headers });
+          } else {
+            await api.post('/api/products', payload, { headers });
+          }
+        } else if (type === 'discount') {
+          if (payload.id) {
+            await api.put(`/api/discount/${payload.code}`, payload, { headers });
+          } else {
+            await api.post("/api/discount", payload, { headers });
+          }
+        } else if (type === 'service') {
+          if (payload.id) {
+            await api.put(`/api/services/${payload.id}`, payload, { headers });
+          } else {
+            await api.post('/api/services', payload, { headers });
+          }
         }
-        await onSaved();
+        
+        await onSaved(); // This should run for all types
       } catch (e) {
         setError(e?.response?.data?.error || e?.message || 'Save failed');
       } finally {
@@ -168,12 +188,17 @@ export default function Admin() {
       }
     }
 
+
     async function del() {
       if (!item.id) return;
       if (!confirm('Delete this item?')) return;
       setSaving(true);
       try {
         if (type === 'product') await api.delete(`/api/products/${item.id}`, { headers });
+        if (type === 'discount'){
+          await api.delete(`/api/discount/${item.code}`, { headers });
+          await onDeleted();
+        } 
         else await api.delete(`/api/services/${item.id}`, { headers });
         await onDeleted();
       } catch (e) {
@@ -299,6 +324,9 @@ export default function Admin() {
           <div className="ml-auto inline-flex rounded-full bg-neutral-900/60 border border-white/10 p-1">
             <button type="button" className={cx("px-3 py-2 rounded-full text-sm", tab==='products' ? 'bg-white text-black' : 'text-neutral-300 hover:text-white')} onClick={()=>setTab('products')}>Products</button>
             <button type="button" className={cx("px-3 py-2 rounded-full text-sm", tab==='services' ? 'bg-white text-black' : 'text-neutral-300 hover:text-white')} onClick={()=>setTab('services')}>Services</button>
+            <button type="button" className={cx("px-3 py-2 rounded-full text-sm", tab==='discounts' ? 'bg-white text-black' : 'text-neutral-300 hover:text-white')} onClick={()=>setTab('discounts')}>Discounts</button>
+            <button type="button" className={cx("px-3 py-2 rounded-full text-sm", tab==='users' ? 'bg-white text-black' : 'text-neutral-300 hover:text-white')} onClick={()=>setTab('users')}>Users</button>
+            <button type="button" className={cx("px-3 py-2 rounded-full text-sm", tab==='orders' ? 'bg-white text-black' : 'text-neutral-300 hover:text-white')} onClick={()=>setTab('orders')}>Orders</button>
           </div>
           <button type="button" onClick={handleLogout} className="px-3 py-2 rounded-full bg-neutral-800 hover:bg-neutral-700">Logout</button>
         </div>
@@ -352,6 +380,33 @@ export default function Admin() {
                 />
               ))}
             </div>
+          </section>
+        )}
+
+        {tab == 'discounts' && (
+          <section>
+            <h2 className="text-lg font-semibold mb-3 text-neutral-200">Add Discounts</h2>
+            {discount.map(s => (
+                <ItemEditor
+                  key={s.id}
+                  type="discount"
+                  initial={s}
+                  onSaved={refresh}
+                  onDeleted={refresh}
+                />
+              ))}
+          </section>
+        )}
+
+        {tab == 'users' && (
+          <section>
+            <h2 className="text-lg font-semibold mb-3 text-neutral-200">Manage Users</h2>
+          </section>
+        )}
+
+        {tab == 'orders' && (
+          <section>
+            <h2 className="text-lg font-semibold mb-3 text-neutral-200">Manage Orders</h2>
           </section>
         )}
 

@@ -53,17 +53,6 @@ const firstImageOf = (item) => {
   return withBase(raw || null);
 };
 
-// ------- Discount application (dev mode with clear placeholders) -------
-function applyDiscountDevOnly(code, amount) {
-  const c = (code || "").trim().toUpperCase();
-  if (!c) return { ok: false, reason: "No code entered" };
-  if (c === "DEV100") return { ok: true, type: "percent", value: 100, code: c };
-  return {
-    ok: false,
-    reason: "Unknown or inactive code client side korting fix dat dit backend gefixed worden"
-  };
-}
-
 // --- NOWPayments Integration example ---
 async function createNowPaymentsInvoice({ items, promo, email }) {
   // Compute total (including discount)
@@ -118,6 +107,11 @@ export default function Checkout() {
   const paypalSdkLoadedRef = useRef(false);
   const lastSdkKeyRef = useRef("");
 
+  const onApplyPromo = async () => {
+    const r = await fetch(`${API_BASE}/api/discount`)
+    console.log(r)
+  }
+
   // Load profile if logged in
   useEffect(() => {
     let alive = true;
@@ -137,33 +131,6 @@ export default function Checkout() {
     run();
     return () => { alive = false; };
   }, [token]);
-
-  const discountAmount = useMemo(() => {
-    if (!promo) return 0;
-    if (promo.type === "percent") return Math.max(0, Math.round((subTotal * promo.value) / 100 * 100) / 100);
-    if (promo.type === "fixed")   return Math.min(subTotal, promo.value);
-    return 0;
-  }, [promo, subTotal]);
-
-  const total = Math.max(0, subTotal - discountAmount);
-
-  const onApplyPromo = async () => {
-    setPromoMsg("");
-    const res = applyDiscountDevOnly(promoInput, subTotal);
-    if (res.ok) {
-      setPromo({ code: res.code, type: res.type, value: res.value });
-      setPromoMsg("Discount applied");
-    } else {
-      setPromo(null);
-      setPromoMsg(res.reason || "Invalid code");
-    }
-  };
-
-  const onRemovePromo = () => {
-    setPromo(null);
-    setPromoInput("");
-    setPromoMsg("");
-  };
 
   // ---- PayPal: fetch config when selected ----
   useEffect(() => {
@@ -278,6 +245,9 @@ export default function Checkout() {
       setPlacing(false);
     }
   };
+
+  const discountAmount = 0
+  const total = 42069
 
   return (
     <div className="bg-neutral-950 text-white min-h-[100dvh] pt-16">

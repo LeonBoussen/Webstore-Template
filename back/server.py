@@ -142,6 +142,9 @@ def verify_token(token: str):
 def db():
     return sqlite3.connect(DATABASE)
 
+from functools import wraps
+from flask import request, jsonify
+
 def require_admin(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -150,18 +153,30 @@ def require_admin(fn):
             return jsonify({"error": "Missing token"}), 401
         token = auth.split(" ", 1)[1].strip()
         body = verify_token(token)
-        if not body or body.get("role") != "user" or not body.get("user_id"):
+        # Only check for a valid token with a user_id
+        if not body or not body.get("user_id"):
             return jsonify({"error": "Invalid token"}), 403
+
         conn = db()
         cur = conn.cursor()
-        cur.execute("SELECT username FROM users WHERE id=?", (body["user_id"],))
+        cur.execute("SELECT is_admin FROM users WHERE id=?", (body["user_id"],))
         row = cur.fetchone()
         conn.close()
-        if not row or row[0] != "LeonBoussen":
-            return jsonify({"error": "Admin access denied"}), 403
-        request.user_id = body["user_id"]
+        admin_flag = int(row[0]) if row else 0
+
+        log(f"Admin check for user_id={body['user_id']}, is_admin={admin_flag}", "DEBUG")
+        if admin_flag != 1:
+            log(f"users {body['user_id']} is not admin", "WARNING")
+            return jsonify({"error": "Admin access required"}), 403
+
+        # Attach user details to request as a dictionary
+        request.user = {
+            "user_id": body["user_id"],
+            "is_admin": admin_flag
+        }
         return fn(*args, **kwargs)
     return wrapper
+
 
 def require_user(fn):
     @wraps(fn)
@@ -422,34 +437,6 @@ def _get_price_for_item(cur, kind: str, iid: int):
     log(f"Unit price determined: {unit}", "INFO")
     return {"name": name, "unit_price": float(unit)}
 
-def _apply_dev_discount(subtotal: float, code: str | None) -> float:
-    log(f"_apply_dev_discount called with subtotal={subtotal}, code={code}", "INFO")
-    if not code:
-        log("No discount code provided", "INFO")
-        return 0.0
-    c = code.strip().upper()
-    log(f"Normalized discount code: {c}", "INFO")
-    if c == "DEV10":
-        discount = round(subtotal * 0.10, 2)
-        log(f"DEV10 code applied: discount={discount}", "SUCCESS")
-        return discount
-    if c == "STUDENT15":
-        discount = round(subtotal * 0.15, 2)
-        log(f"STUDENT15 code applied: discount={discount}", "SUCCESS")
-        return discount
-    if c == "SAVE5":
-        discount = min(5.0, subtotal)
-        log(f"SAVE5 code applied: discount={discount}", "SUCCESS")
-        return discount
-    log(f"Unknown discount code '{c}', no discount applied", "WARNING")
-    return 0.0
-
-def get_discount(subtotal, discount_code):
-    # Use your existing discount logic!
-    c = (discount_code or "").strip().upper()
-    if c == "DEV100":
-        return round(subtotal, 2)
-    return 0.0
 
 def compute_amounts(items: list, discount_code: str | None):
     """
@@ -485,11 +472,11 @@ def compute_amounts(items: list, discount_code: str | None):
 
         subtotal = round(subtotal, 2)
         log(f"Subtotal calculated: {subtotal}", "INFO")
-        discount = _apply_dev_discount(subtotal, discount_code)
-        log(f"Discount calculated: {discount}", "INFO")
-        total = max(0.0, round(subtotal - discount, 2))
+        #discount = _apply_dev_discount(subtotal, discount_code)
+        #log(f"Discount calculated: {discount}", "INFO")
+        total = max(0.0, round(subtotal, 2)) # <-- add discount here when implemented
         log(f"Total calculated: {total}", "INFO")
-        return {"subtotal": subtotal, "discount": discount, "total": total}, None
+        return {"subtotal": subtotal, "discount": "not implemented", "total": total}, None
 
 @app.route('/api/paypal/config', methods=['GET'])
 def paypal_config():
@@ -758,15 +745,22 @@ def auth_me():
     conn = db()
     cur = conn.cursor()
     log(f"Querying user profile for user_id={request.user_id}", "INFO")
-    cur.execute("SELECT id, email, username FROM users WHERE id=?", (request.user_id,))
+    cur.execute("SELECT id, email, username, is_admin FROM users WHERE id=?", (request.user_id,))
     row = cur.fetchone()
+    log(f"Fetched user profile from database{row}", "INFO")
     conn.close()
     log("Closed database connection after /api/auth/me", "INFO")
     if not row:
         log(f"User not found for user_id={request.user_id}", "WARNING")
         return jsonify({"error": "not found"}), 404
-    log(f"Returning user profile: id={row[0]}, email={row[1]}, username={row[2]}", "SUCCESS")
-    return jsonify({"id": row[0], "email": row[1], "username": row[2]})
+    log(f"Returning user profile: id={row[0]}, email={row[1]}, username={row[2]}, is_admin={row[3]}", "SUCCESS")
+    return jsonify({
+        "id": row[0], 
+        "email": row[1], 
+        "username": row[2],
+        "is_admin": row[3]
+    })
+
 
 @app.route('/api/user/profile', methods=['GET'])
 @require_user
@@ -904,6 +898,7 @@ def upload_image():
 @app.route('/api/products', methods=['POST'])
 @require_admin
 def products_create():
+    log(f"Entry: /api/products (POST) by user_id {request.user['user_id']} is_admin={request.user['is_admin']}", "DEBUG")
     log("Received request to create new product", "INFO")
     data = request.get_json(force=True)
     name = data.get('name')
@@ -921,7 +916,6 @@ def products_create():
     if not name or price is None:
         log("Missing required fields for product creation", "WARNING")
         return jsonify({"error": "`name` and `price` are required"}), 400
-
     conn = db()
     try:
         conn.execute("PRAGMA foreign_keys = ON")  # enable FK (SQLite quirk)
@@ -944,6 +938,7 @@ def products_create():
 
         conn.commit()
         log(f"Product {new_id} created successfully", "SUCCESS")
+        log(f"End of endpoint api/products POST: {jsonify({'id': new_id}), 201}", "DEBUG")
         return jsonify({"id": new_id}), 201
     except Exception as e:
         log(f"Error creating product: {e}", "ERROR")
@@ -951,6 +946,8 @@ def products_create():
     finally:
         conn.close()
         log("Database connection closed for product creation", "INFO")
+        
+
 
 @app.route('/api/products/<int:pid>', methods=['PUT'])
 @require_admin
@@ -1178,6 +1175,76 @@ def uploaded_file(filename):
     log(f"Serving uploaded file: {filename}", "INFO")
     return send_from_directory(UPLOAD_DIR, filename)
 
+@app.route('/api/discount', methods=['GET'])
+def discount_get():
+    log("Received request for discount codes", "INFO")
+    conn = db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT code, kind, value, active, starts_at, expires_at, max_uses, used_count, applies_to, created_at
+        FROM discount_codes
+    """)
+    rows = cur.fetchall()
+    conn.close()
+    log(f"Fetched {len(rows)} discount codes from database", "SUCCESS")
+    result = []
+    for r in rows:
+        result.append({
+            "code": r[0],
+            "kind": r[1],
+            "value": r[2],
+            "active": bool(r[3]),
+            "starts_at": r[4],
+            "expires_at": r[5],
+            "max_uses": r[6],
+            "used_count": r[7],
+            "applies_to": r[8],
+            "created_at": r[9],
+        })
+    log(f"Returning discount codes: {result}", "SUCCESS")
+    return jsonify(result)
+
+@app.route('/api/discount', methods=['POST'])
+@require_admin
+def discount_create():
+    log("Received request to create discount code", "INFO")
+    data = request.get_json(force=True)
+    code = (data.get("code") or "").strip().upper()
+    kind = (data.get("kind") or "percent").strip().lower()  # "percent" or "fixed"
+    value = data.get("value")
+    active = int(bool(data.get("active", True)))
+    starts_at = data.get("starts_at")
+    expires_at = data.get("expires_at")
+    max_uses = data.get("max_uses")
+    applies_to = data.get("applies_to")
+    created_at = datetime.utcnow().isoformat(timespec="seconds")
+
+    if not code or value is None:
+        log("Missing required fields for discount creation", "WARNING")
+        return jsonify({"error": "`code` and `value` are required"}), 400
+
+    try:
+        conn = db()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO discount_codes
+            (code, kind, value, active, starts_at, expires_at, max_uses, used_count, applies_to, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+        """, (
+            code, kind, value, active, starts_at, expires_at, max_uses, applies_to, created_at
+        ))
+        conn.commit()
+        conn.close()
+        log(f"Discount code '{code}' created successfully", "SUCCESS")
+        return jsonify({"ok": True, "code": code}), 201
+    except sqlite3.IntegrityError:
+        log(f"Discount code '{code}' already exists", "WARNING")
+        return jsonify({"error": "discount code already exists"}), 409
+    except Exception as e:
+        log(f"Failed to create discount code: {e}", "ERROR")
+        return jsonify({"error": "failed to create discount code"}), 500
+
+
 @app.route("/api/nowpayments/create-invoice", methods=["POST"])
 def nowpayments_create_invoice():
     data = request.get_json(force=True, silent=True) or {}
@@ -1204,7 +1271,8 @@ def nowpayments_create_invoice():
             description.append(f"{qty}x {name}")
     
     subtotal = round(subtotal, 2)
-    discount = get_discount(subtotal, discount_code)
+    #discount = get_discount(subtotal, discount_code)
+    discount = 0.0  # Discounts not implemented yet
     
     # Add 10% crypto fee
     fee = round((subtotal - discount) * 0.10, 2)

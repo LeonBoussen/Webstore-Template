@@ -174,6 +174,7 @@ def create_or_update_db_table():
             ('users', 'preferred_payment', 'TEXT'),
             ('users', 'phone', 'TEXT'),
             ('users', 'address', 'TEXT'),
+            ('users', 'is_admin', 'TEXT'),
         ]
         for table, col, definition in users_backfill:
             if table_exists(cursor, table) and not column_exists(cursor, table, col):
