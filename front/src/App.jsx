@@ -14,6 +14,10 @@ import ProductDetails from './pages/ProductDetails';
 import Checkout from './pages/Checkout';
 import Orders from './pages/orders';
 
+import PaymentCancelled from './pages/PaymentCancelled';
+import PaymentPartial from './pages/PaymentPartial';
+import PaymentSuccess from './pages/PaymentSuccess';
+
 function App() {
   return (
     <Router>
@@ -31,6 +35,9 @@ function App() {
             <Route path="/account" element={<Account />} />
             <Route path="/checkout" element={<Checkout/>} />
             <Route path="/orders" element={<Orders/>} />
+            <Route path="/payment/success" element={<PaymentSuccess />} />
+            <Route path="/payment/cancelled" element={<PaymentCancelled />} />
+            <Route path="/payment/partial" element={<PaymentPartial />} />
             <Route path="*" element={<div className="p-6">404 - This page is not here, contact the developer!</div>} />
           </Routes>
     </Router>

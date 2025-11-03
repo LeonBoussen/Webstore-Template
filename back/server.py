@@ -10,11 +10,13 @@ try:
     import os, hashlib, hmac, base64, json, time
     from functools import wraps
     from werkzeug.utils import secure_filename
+    from werkzeug.exceptions import HTTPException
     from dotenv import load_dotenv
     import urllib.request
     import urllib.parse
     import ssl
     import requests
+    import json
     try:
         from PIL import Image
         PIL_AVAILABLE = True
@@ -53,15 +55,15 @@ try:
     PBKDF2_ITERATIONS = 200_000  # used by hash_password/verify_password
 
     # --- PayPal / currency configuration ---
-    PAYPAL_CLIENT_ID = os.environ.get("PAYPAL_CLIENT_ID", "")
-    PAYPAL_CLIENT_SECRET = os.environ.get("PAYPAL_CLIENT_SECRET", "")
-    PAYPAL_ENV = (os.environ.get("PAYPAL_ENV", "sandbox") or "sandbox").lower()  # "sandbox" or "live"
+    PAYPAL_CLIENT_ID = os.environ.get("PAYPAL_CLIENT_ID")
+    PAYPAL_CLIENT_SECRET = os.environ.get("PAYPAL_CLIENT_SECRET")
+    PAYPAL_ENV = (os.environ.get("PAYPAL_ENV") or "sandbox").lower()  # "sandbox" or "live"
     CURRENCY = os.environ.get("CURRENCY", "EUR")
     _PAYPAL_TOKEN = None
     _PAYPAL_TOKEN_EXP = 0
 
     # --- nowpayments config ---
-    NOWPAYMENTS_API_KEY = os.environ.get("NOWPAYMENTS_API_KEY", "")
+    NOWPAYMENTS_API_KEY = os.environ.get("NOWPAYMENTS_API_KEY")
 
 
 except ValueError as e:
@@ -478,6 +480,32 @@ def compute_amounts(items: list, discount_code: str | None):
         log(f"Total calculated: {total}", "INFO")
         return {"subtotal": subtotal, "discount": "not implemented", "total": total}, None
 
+@app.errorhandler(404)
+def not_found(e):
+    """Return JSON for 404 errors"""
+    return jsonify({"error": "Endpoint not found", "message": str(e)}), 404
+
+@app.errorhandler(405)
+def method_not_allowed(e):
+    """Return JSON for 405 errors"""
+    return jsonify({"error": "Method not allowed", "message": str(e)}), 405
+
+@app.errorhandler(500)
+def internal_error(e):
+    """Return JSON for 500 errors"""
+    return jsonify({"error": "Internal server error", "message": str(e)}), 500
+
+@app.errorhandler(HTTPException)
+def handle_http_exception(e):
+    """Return JSON instead of HTML for HTTP errors"""
+    response = {
+        "error": e.name,
+        "message": e.description,
+        "status": e.code
+    }
+    return jsonify(response), e.code
+
+
 @app.route('/api/paypal/config', methods=['GET'])
 def paypal_config():
     log("Received request for PayPal config", "INFO")
@@ -582,10 +610,6 @@ def paypal_capture_order():
     ok = status in ("COMPLETED", "APPROVED")
     log(f"PayPal order capture status: {status}, ok: {ok}", "SUCCESS" if ok else "WARNING")
     return jsonify({"ok": ok, "status": status, "details": res})
-
-# ----------------------------
-# Existing business endpoints
-# ----------------------------
 
 @app.route('/api/catchphrase', methods=['GET'])
 def catchphrase():
@@ -1189,6 +1213,16 @@ def discount_get():
     log(f"Fetched {len(rows)} discount codes from database", "SUCCESS")
     result = []
     for r in rows:
+        # Parse applies_to JSON string if present
+        applies_to_data = r[8]
+        if applies_to_data:
+            try:
+                applies_to_parsed = json.loads(applies_to_data) if isinstance(applies_to_data, str) else applies_to_data
+            except:
+                applies_to_parsed = {"mode": "all", "product_ids": [], "service_ids": []}
+        else:
+            applies_to_parsed = {"mode": "all", "product_ids": [], "service_ids": []}
+        
         result.append({
             "code": r[0],
             "kind": r[1],
@@ -1198,11 +1232,12 @@ def discount_get():
             "expires_at": r[5],
             "max_uses": r[6],
             "used_count": r[7],
-            "applies_to": r[8],
+            "applies_to": applies_to_parsed,
             "created_at": r[9],
         })
     log(f"Returning discount codes: {result}", "SUCCESS")
     return jsonify(result)
+
 
 @app.route('/api/discount', methods=['POST'])
 @require_admin
@@ -1216,12 +1251,15 @@ def discount_create():
     starts_at = data.get("starts_at")
     expires_at = data.get("expires_at")
     max_uses = data.get("max_uses")
-    applies_to = data.get("applies_to")
+    applies_to = data.get("applies_to", {"mode": "all", "product_ids": [], "service_ids": []})
     created_at = datetime.utcnow().isoformat(timespec="seconds")
 
     if not code or value is None:
         log("Missing required fields for discount creation", "WARNING")
         return jsonify({"error": "`code` and `value` are required"}), 400
+
+    # Serialize applies_to to JSON string
+    applies_to_str = json.dumps(applies_to) if isinstance(applies_to, dict) else applies_to
 
     try:
         conn = db()
@@ -1231,7 +1269,7 @@ def discount_create():
             (code, kind, value, active, starts_at, expires_at, max_uses, used_count, applies_to, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
         """, (
-            code, kind, value, active, starts_at, expires_at, max_uses, applies_to, created_at
+            code, kind, value, active, starts_at, expires_at, max_uses, applies_to_str, created_at
         ))
         conn.commit()
         conn.close()
@@ -1245,45 +1283,259 @@ def discount_create():
         return jsonify({"error": "failed to create discount code"}), 500
 
 
+@app.route('/api/discount/<code>', methods=['PUT'])
+@require_admin
+def discount_update(code):
+    log(f"Received request to update discount code '{code}'", "INFO")
+    data = request.get_json(force=True)
+    
+    kind = (data.get("kind") or "percent").strip().lower()
+    value = data.get("value")
+    active = int(bool(data.get("active", True)))
+    starts_at = data.get("starts_at")
+    expires_at = data.get("expires_at")
+    max_uses = data.get("max_uses")
+    applies_to = data.get("applies_to", {"mode": "all", "product_ids": [], "service_ids": []})
+    
+    # Serialize applies_to to JSON string
+    applies_to_str = json.dumps(applies_to) if isinstance(applies_to, dict) else applies_to
+
+    try:
+        conn = db()
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE discount_codes
+            SET kind = ?, value = ?, active = ?, starts_at = ?, expires_at = ?, max_uses = ?, applies_to = ?
+            WHERE code = ?
+        """, (kind, value, active, starts_at, expires_at, max_uses, applies_to_str, code))
+        conn.commit()
+        conn.close()
+        log(f"Discount code '{code}' updated successfully", "SUCCESS")
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        log(f"Failed to update discount code: {e}", "ERROR")
+        return jsonify({"error": "failed to update discount code"}), 500
+
+
+@app.route('/api/discount/<code>', methods=['DELETE'])
+@require_admin
+def discount_delete(code):
+    log(f"Received request to delete discount code '{code}'", "INFO")
+    try:
+        conn = db()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM discount_codes WHERE code = ?", (code,))
+        conn.commit()
+        conn.close()
+        log(f"Discount code '{code}' deleted successfully", "SUCCESS")
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        log(f"Failed to delete discount code: {e}", "ERROR")
+        return jsonify({"error": "failed to delete discount code"}), 500
+
+
+
+@app.route('/api/discount/validate', methods=['POST'])
+def discount_validate():
+    """Validate a discount code and calculate the discount amount"""
+    log("Received discount validation request", "INFO")
+    
+    try:
+        data = request.get_json(force=True)
+    except Exception as e:
+        log(f"Failed to parse JSON: {e}", "ERROR")
+        return jsonify({"valid": False, "error": "Invalid request data"}), 400
+    
+    code = (data.get("code") or "").strip().upper()
+    cart_items = data.get("items", [])
+    
+    if not code:
+        return jsonify({"valid": False, "message": "Discount code is required"}), 200
+    
+    if not cart_items:
+        return jsonify({"valid": False, "message": "Cart is empty"}), 200
+    
+    try:
+        conn = db()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT code, kind, value, active, starts_at, expires_at, max_uses, used_count, applies_to
+            FROM discount_codes
+            WHERE code = ?
+        """, (code,))
+        row = cur.fetchone()
+        conn.close()
+        
+        if not row:
+            log(f"Discount code '{code}' not found", "WARNING")
+            return jsonify({"valid": False, "message": "Invalid discount code"}), 200
+        
+        discount_code, kind, value, active, starts_at, expires_at, max_uses, used_count, applies_to_str = row
+        
+        # Check if active
+        if not active:
+            log(f"Discount code '{code}' is inactive", "WARNING")
+            return jsonify({"valid": False, "message": "This discount code is no longer active"}), 200
+        
+        # Check start date
+        now = datetime.utcnow()
+        if starts_at:
+            try:
+                start_date = datetime.fromisoformat(starts_at.replace('Z', '+00:00'))
+                if now < start_date:
+                    return jsonify({"valid": False, "message": "This discount code is not yet valid"}), 200
+            except:
+                pass
+        
+        # Check expiration
+        if expires_at:
+            try:
+                exp_date = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                if now > exp_date:
+                    return jsonify({"valid": False, "message": "This discount code has expired"}), 200
+            except:
+                pass
+        
+        # Check max uses
+        if max_uses is not None and used_count >= max_uses:
+            return jsonify({"valid": False, "message": "This discount code has reached its usage limit"}), 200
+        
+        # Parse applies_to
+        applies_to = {"mode": "all", "product_ids": [], "service_ids": []}
+        if applies_to_str:
+            try:
+                applies_to = json.loads(applies_to_str) if isinstance(applies_to_str, str) else applies_to_str
+            except:
+                pass
+        
+        # Calculate discount amount
+        subtotal = sum(item.get("price", 0) * item.get("qty", 1) for item in cart_items)
+        
+        # Filter applicable items based on whitelist/blacklist
+        applicable_total = 0
+        for item in cart_items:
+            item_id = item.get("id")
+            item_kind = item.get("kind", "product")
+            item_price = item.get("price", 0) * item.get("qty", 1)
+            
+            if applies_to["mode"] == "all":
+                applicable_total += item_price
+            elif applies_to["mode"] == "whitelist":
+                if item_kind == "product" and item_id in applies_to.get("product_ids", []):
+                    applicable_total += item_price
+                elif item_kind == "service" and item_id in applies_to.get("service_ids", []):
+                    applicable_total += item_price
+            elif applies_to["mode"] == "blacklist":
+                if item_kind == "product" and item_id not in applies_to.get("product_ids", []):
+                    applicable_total += item_price
+                elif item_kind == "service" and item_id not in applies_to.get("service_ids", []):
+                    applicable_total += item_price
+        
+        if applicable_total == 0:
+            return jsonify({"valid": False, "message": "This discount does not apply to items in your cart"}), 200
+        
+        # Calculate discount
+        discount_amount = 0
+        if kind == "percent":
+            discount_amount = (applicable_total * value) / 100
+        elif kind == "fixed":
+            discount_amount = min(value, applicable_total)
+        
+        log(f"Discount code '{code}' validated successfully: -{discount_amount}", "SUCCESS")
+        return jsonify({
+            "valid": True,
+            "code": discount_code,
+            "kind": kind,
+            "value": value,
+            "discount_amount": round(discount_amount, 2),
+            "message": f"Discount applied successfully"
+        }), 200
+        
+    except Exception as e:
+        log(f"Failed to validate discount code: {e}", "ERROR")
+        return jsonify({"valid": False, "error": f"Server error: {str(e)}"}), 500
+
+
 @app.route("/api/nowpayments/create-invoice", methods=["POST"])
 def nowpayments_create_invoice():
     data = request.get_json(force=True, silent=True) or {}
     items = data.get("items", [])
-    email = data.get("email") or ""
+    email = data.get("email", "") or ""
     discount_code = data.get("discount_code")
-    
-    # Compute subtotal (same logic as PayPal/server calc)
-    subtotal = 0.0
-    description = []
-    
+    discount_amount = 0
+
     with db() as conn:
         cur = conn.cursor()
+
+        # Prepare items for discount validation
+        discount_items = []
+        for it in items:
+            product_info = _get_price_for_item(cur, it.get("kind", "product"), int(it["id"]))
+            if product_info:
+                price = (product_info.get("unit_price") or 
+                        product_info.get("price") or 
+                        product_info.get("discount_price") or 0)
+            else:
+                price = 0
+            
+            discount_items.append({
+                "id": it["id"],
+                "kind": it.get("kind", "product"),
+                "qty": it.get("qty", 1),
+                "price": price
+            })
+
+        # Validate discount code if provided
+        if discount_code:
+            discount_res = requests.post(
+                "http://127.0.0.1:5000/api/discount/validate",
+                json={
+                    "code": discount_code,
+                    "items": discount_items
+                }
+            )
+            discount_data = discount_res.json()
+            if discount_data.get("valid"):
+                discount_amount = discount_data["discount_amount"]
+            else:
+                return jsonify({"error": f"Invalid discount: {discount_data.get('message') or 'Unknown'}"}), 400
+
+        subtotal = 0.0
+        description = []
+
+        # Calculate subtotal securely by fetching prices from DB
         for it in items:
             iid = int(it.get("id"))
             kind = it.get("kind", "").strip().lower()
             qty = int(it.get("qty", 1))
-            # Use your get_price_for_item from server.py
             product_info = _get_price_for_item(cur, kind, iid)
             if not product_info:
                 return jsonify({"error": f"Item not found {kind} {iid}"}), 400
-            name, unit_price = product_info
+            
+            name = product_info.get("name", "Unknown")
+            unit_price = float(
+                product_info.get("unit_price") or 
+                product_info.get("price") or 
+                product_info.get("discount_price") or 0
+            )
+            
+            log(f"Item {name}: unit_price={unit_price}, qty={qty}, line_total={unit_price * max(1, qty)}", "INFO")
+            
             subtotal += unit_price * max(1, qty)
-            description.append(f"{qty}x {name}")
-    
-    subtotal = round(subtotal, 2)
-    #discount = get_discount(subtotal, discount_code)
-    discount = 0.0  # Discounts not implemented yet
-    
-    # Add 10% crypto fee
-    fee = round((subtotal - discount) * 0.10, 2)
-    total = max(0, round(subtotal - discount + fee, 2))
-    
+            description.append(f"{name} x{qty} (€{unit_price:.2f} each)")
+
+    # Apply discount and calculate fees
+    subtotal = max(subtotal - float(discount_amount), 0)
+    fee = round(subtotal * 0.10, 2)
+    total = round(subtotal + fee, 2)
+    log(f"Subtotal: {subtotal}, Discount: {discount_amount}, Fee: {fee}, Total: {total}", "WARNING")
+
     if total <= 0:
         return jsonify({"error": "Total must be greater than zero for crypto payment"}), 400
 
     invoice_description = ", ".join(description)
-    
-    # NowPayments CREATE INVOICE API
+
+    # Create invoice with nowpayments API
     try:
         np_res = requests.post(
             "https://api.nowpayments.io/v1/invoice",
@@ -1295,15 +1547,42 @@ def nowpayments_create_invoice():
                 "price_amount": total,
                 "price_currency": "eur",
                 "order_description": invoice_description,
-                "customer_email": email
+                "customer_email": email,
+                "success_url": "http://localhost:5173/payment/success",
+                "cancel_url": "http://localhost:5173/payment/cancelled",
+                "partially_paid_url": "http://localhost:5173/payment/partial",
+                "ipn_callback_url": "http://127.0.0.1:5000/api/nowpayments/ipn"
             }
         )
         np_res.raise_for_status()
         invoice = np_res.json()
-        # e.g., payment_url in invoice
-        return jsonify(invoice)
+        
+        # Map invoice_url to paymenturl for frontend consistency
+        return jsonify({
+            "payment_url": invoice.get("invoice_url"),
+            "invoiceid": invoice.get("id"),
+            "invoice": invoice
+        })
     except Exception as e:
-        return jsonify({"error": f"Failed to create invoice with NowPayments: {str(e)}"}), 500
+        return jsonify({"error": f"Failed to create invoice: {str(e)}"}), 500
+
+@app.route("/api/nowpayments/ipn", methods=["POST"])
+def nowpayments_ipn():
+    try:
+        data = request.get_json()
+        payment_status = data.get("payment_status")
+        invoice_id = data.get("invoice_id")
+        
+        # Verify payment and update order status in database
+        log(f"Payment status: {payment_status} for invoice: {invoice_id}", "INFO")
+        
+        # Update your database order status here
+        
+        return jsonify({"status": "ok"}), 200
+    except Exception as e:
+        log(f"IPN callback error: {str(e)}", "ERROR")
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route('/api/contact', methods=['POST'])
 def contact_submit():

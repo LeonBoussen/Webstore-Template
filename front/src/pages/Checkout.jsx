@@ -13,17 +13,19 @@ const withBase = (u) =>
 // ------- Local cart helper -------
 function useLocalCart() {
   const read = () => {
-    try { return JSON.parse(localStorage.getItem("cart") || "[]"); } catch { return []; }
+    try {
+      return JSON.parse(localStorage.getItem("cart") || "[]");
+    } catch {
+      return [];
+    }
   };
   const [items, setItems] = useState(read);
-
   const save = (arr) => {
     localStorage.setItem("cart", JSON.stringify(arr));
     setItems(arr);
     const total = arr.reduce((n, it) => n + (it.qty || 1), 0);
     window.dispatchEvent(new CustomEvent("cart:updated", { detail: { total } }));
   };
-
   const inc = (id, kind) => {
     save(items.map(it => (it.id === id && it.kind === kind ? { ...it, qty: (it.qty || 1) + 1 } : it)));
   };
@@ -36,48 +38,71 @@ function useLocalCart() {
   };
   const remove = (id, kind) => save(items.filter(it => !(it.id === id && it.kind === kind)));
   const clear = () => save([]);
-
   const subTotal = items.reduce(
-    (sum, it) => sum + ((it.discount_price ?? it.price) || 0) * (it.qty || 1),
-    0
+    (sum, it) => sum + ((it.discount_price ?? it.price) || 0) * (it.qty || 1), 0
   );
   return { items, inc, dec, remove, clear, subTotal };
 }
 
 const firstImageOf = (item) => {
-  const raw =
-    item?.image1 ??
-    item?.image_url ?? item?.image_path ??
-    (Array.isArray(item?.image_urls) ? item.image_urls[0] : undefined) ??
-    (Array.isArray(item?.gallery) ? item.gallery[0] : undefined);
+  const raw = item?.image1 ?? item?.image_url ?? item?.image_path
+    ?? (Array.isArray(item?.image_urls) ? item.image_urls[0] : undefined)
+    ?? (Array.isArray(item?.gallery) ? item.gallery[0] : undefined);
   return withBase(raw || null);
 };
 
-// --- NOWPayments Integration example ---
-async function createNowPaymentsInvoice({ items, promo, email }) {
-  // Compute total (including discount)
-  let subTotal = items.reduce((sum, it) => sum + ((it.discount_price ?? it.price) || 0) * (it.qty || 1), 0);
-  let discount = 0;
-  if (promo?.type === "percent") discount = (subTotal * promo.value) / 100;
-  if (promo?.type === "fixed") discount = promo.value;
-  const total = Math.max(0, subTotal - discount);
+// Validate discount code against backend
+async function validateDiscount(code, cartItems) {
+  try {
+    const res = await fetch(`${API_BASE}/api/discount/validate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        code: code.toUpperCase(),
+        items: cartItems.map(it => ({
+          id: it.id,
+          kind: it.kind,
+          qty: it.qty || 1,
+          price: (it.discount_price ?? it.price) || 0
+        }))
+      }),
+    });
 
-  // Description for invoice
-  const description = items.map(it => `${it.qty}x ${it.name}`).join(", ");
+    const contentType = res.headers.get("content-type");
+    if (!contentType || !contentType.includes("application/json")) {
+      console.error("Server returned non-JSON response:", await res.text());
+      throw new Error("Server error - please check if the API is running");
+    }
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data?.message || data?.error || "Failed to validate discount");
+    }
+    return data;
+  } catch (error) {
+    console.error("Discount validation error:", error);
+    throw error;
+  }
+}
 
-  // Call local backend, which performs NowPayments invoice creation for security
+// --- NOWPayments Integration (SECURE!) ---
+async function createNowPaymentsInvoice({ items, discountCode, email }) {
+  const payload = {
+    items: items.map(it => ({
+      id: it.id,
+      kind: it.kind,
+      qty: it.qty || 1
+    })),
+    email,
+    discount_code: discountCode || null
+  };
+
   const res = await fetch(`${API_BASE}/api/nowpayments/create-invoice`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      amount: total,
-      currency: "eur",
-      email,
-      description,
-    }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(await res.text());
-  return await res.json(); // Should include payment_url or invoice info.
+  return await res.json();
 }
 
 export default function Checkout() {
@@ -85,19 +110,19 @@ export default function Checkout() {
   const token = localStorage.getItem("userToken");
   const { items, inc, dec, remove, clear, subTotal } = useLocalCart();
 
-  // customer details (pre-fill from profile if logged in)
+  // customer details
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState("");
 
   // discount
   const [promoInput, setPromoInput] = useState("");
-  const [promo, setPromo] = useState(null); // {code, type, value}
+  const [promo, setPromo] = useState(null); // {code, kind, value, discount_amount}
   const [promoMsg, setPromoMsg] = useState("");
+  const [promoLoading, setPromoLoading] = useState(false);
 
   // payments
   const [method, setMethod] = useState("paypal"); // paypal | crypto
-  const [crypto, setCrypto] = useState("btc");     // btc | xmr
-
+  const [crypto, setCrypto] = useState("btc"); // btc | xmr
   const [placing, setPlacing] = useState(false);
   const [toast, setToast] = useState("");
 
@@ -107,10 +132,84 @@ export default function Checkout() {
   const paypalSdkLoadedRef = useRef(false);
   const lastSdkKeyRef = useRef("");
 
+  // Create a memoized cart signature for tracking changes
+  const cartSignature = useMemo(
+    () => items.map(it => `${it.id}-${it.kind}-${it.qty}`).join('|'),
+    [items]
+  );
+
+  // Calculate discount and total
+  const discountAmount = promo?.discount_amount || 0;
+  const total = Math.max(0, subTotal - discountAmount);
+
+  // Auto-revalidate discount when cart changes
+  useEffect(() => {
+    if (!promo || !promo.code) return;
+
+    const revalidateDiscount = async () => {
+      if (items.length === 0) {
+        setPromo(null);
+        setPromoMsg("");
+        return;
+      }
+      try {
+        const result = await validateDiscount(promo.code, items);
+        if (result.valid) {
+          setPromo({
+            code: result.code,
+            kind: result.kind,
+            value: result.value,
+            discount_amount: result.discount_amount
+          });
+          setPromoMsg(`✓ Discount applied: ${result.code}`);
+        } else {
+          setPromo(null);
+          setPromoMsg(result.message || "Discount no longer valid");
+        }
+      } catch (err) {
+        setPromoMsg("⚠ Could not update discount calculation");
+      }
+    };
+    const timeoutId = setTimeout(revalidateDiscount, 300);
+    return () => clearTimeout(timeoutId);
+  }, [cartSignature, promo?.code]);
+
+  // Discount apply/remove
   const onApplyPromo = async () => {
-    const r = await fetch(`${API_BASE}/api/discount`)
-    console.log(r)
-  }
+    if (!promoInput.trim()) {
+      setPromoMsg("Please enter a discount code");
+      return;
+    }
+    setPromoLoading(true);
+    setPromoMsg("");
+    try {
+      const result = await validateDiscount(promoInput.trim(), items);
+      if (result.valid) {
+        setPromo({
+          code: result.code,
+          kind: result.kind,
+          value: result.value,
+          discount_amount: result.discount_amount
+        });
+        setPromoMsg(`✓ Discount applied: ${result.code}`);
+        setPromoInput("");
+      } else {
+        setPromoMsg(result.message || "Invalid discount code");
+        setPromo(null);
+      }
+    } catch (err) {
+      setPromoMsg(err.message || "Failed to validate discount code");
+      setPromo(null);
+    } finally {
+      setPromoLoading(false);
+    }
+  };
+
+  const onRemovePromo = () => {
+    setPromo(null);
+    setPromoMsg("");
+    setPromoInput("");
+  };
 
   // Load profile if logged in
   useEffect(() => {
@@ -118,7 +217,9 @@ export default function Checkout() {
     async function run() {
       if (!token) return;
       try {
-        const r = await fetch(`${API_BASE}/api/user/profile`, { headers: { Authorization: `Bearer ${token}` } });
+        const r = await fetch(`${API_BASE}/api/user/profile`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
         if (!r.ok) throw new Error(await r.text());
         const data = await r.json();
         if (!alive) return;
@@ -165,7 +266,11 @@ export default function Checkout() {
         style: { layout: "vertical" },
         createOrder: async () => {
           const payload = {
-            items: items.map(it => ({ id: it.id, kind: it.kind, qty: it.qty || 1 })),
+            items: items.map(it => ({
+              id: it.id,
+              kind: it.kind,
+              qty: it.qty || 1
+            })),
             discount_code: promo?.code || null
           };
           const res = await fetch(`${API_BASE}/api/paypal/create-order`, {
@@ -235,7 +340,11 @@ export default function Checkout() {
     }
     setPlacing(true);
     try {
-      const invoice = await createNowPaymentsInvoice({ items, promo, email });
+      const invoice = await createNowPaymentsInvoice({
+        items,
+        discountCode: promo?.code || null,
+        email
+      });
       setToast("Redirecting for crypto payment...");
       clear();
       window.location.href = invoice.payment_url;
@@ -245,9 +354,6 @@ export default function Checkout() {
       setPlacing(false);
     }
   };
-
-  const discountAmount = 0
-  const total = 42069
 
   return (
     <div className="bg-neutral-950 text-white min-h-[100dvh] pt-16">
@@ -277,8 +383,59 @@ export default function Checkout() {
                 placeholder="Street, number&#10;Postal code, City&#10;Country"
               />
               <div className="mt-3 text-xs text-neutral-400 inline-flex items-center gap-2">
-                <ShieldCheck size={14} className="text-emerald-300"/> We’ll only use this for order and delivery updates.
+                <ShieldCheck size={14} className="text-emerald-300"/> We'll only use this for order and delivery updates.
               </div>
+            </section>
+
+            <section className="rounded-2xl border border-white/10 bg-neutral-900/60 p-6 backdrop-blur">
+              <h2 className="text-lg font-semibold">Discount code</h2>
+              <div className="mt-3 flex gap-2 items-center">
+                <input
+                  className="flex-1 rounded-lg bg-neutral-800 border border-white/10 px-3 py-2 text-sm"
+                  placeholder="Enter code (e.g., SAVE20)"
+                  value={promoInput} 
+                  onChange={e => setPromoInput(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && onApplyPromo()}
+                  disabled={promoLoading || !!promo}
+                />
+                {promo ? (
+                  <button 
+                    className="rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-sm hover:bg-neutral-800"
+                    onClick={onRemovePromo}
+                  >
+                    Remove
+                  </button>
+                ) : (
+                  <button 
+                    className="rounded-lg bg-white text-neutral-900 px-3 py-2 text-sm font-semibold hover:bg-neutral-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={onApplyPromo}
+                    disabled={promoLoading || !promoInput.trim()}
+                  >
+                    {promoLoading ? "..." : "Apply"}
+                  </button>
+                )}
+              </div>
+              {promoMsg && (
+                <div className={cls(
+                  "mt-2 text-sm",
+                  promo ? "text-emerald-300" : "text-rose-300"
+                )}>
+                  {promoMsg}
+                </div>
+              )}
+              {promo && (
+                <div className="mt-3 inline-flex items-center gap-2 rounded-md bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300">
+                  <span className="font-semibold">{promo.code}</span>
+                  <span>•</span>
+                  <span>
+                    {promo.kind === "percent" 
+                      ? `${promo.value}% off` 
+                      : `−${fmt.format(promo.value)}`}
+                  </span>
+                  <span>•</span>
+                  <span>−{fmt.format(discountAmount)}</span>
+                </div>
+              )}
             </section>
 
             <section className="rounded-2xl border border-white/10 bg-neutral-900/60 p-6 backdrop-blur">
@@ -310,7 +467,7 @@ export default function Checkout() {
                 <h2 className="text-lg font-semibold mb-3">Pay with PayPal</h2>
                 <div ref={paypalDivRef} id="paypal-buttons" />
                 <div className="mt-2 text-xs text-neutral-400">
-                  After approval, we’ll capture the payment and finalize your order automatically.
+                  After approval, we'll capture the payment and finalize your order automatically.
                 </div>
               </section>
             )}
@@ -335,36 +492,6 @@ export default function Checkout() {
                 </div>
               </section>
             )}
-
-            <section className="rounded-2xl border border-white/10 bg-neutral-900/60 p-6 backdrop-blur">
-              <h2 className="text-lg font-semibold">Discount code</h2>
-              <div className="mt-3 flex gap-2 items-center">
-                <input
-                  className="flex-1 rounded-lg bg-neutral-800 border border-white/10 px-3 py-2 text-sm"
-                  placeholder="Enter code (e.g., DEV100)"
-                  value={promoInput} onChange={e => setPromoInput(e.target.value)}
-                />
-                {promo ? (
-                  <button className="rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-sm hover:bg-neutral-800"
-                          onClick={onRemovePromo}>
-                    Remove
-                  </button>
-                ) : (
-                  <button className="rounded-lg bg-white text-neutral-900 px-3 py-2 text-sm font-semibold hover:bg-neutral-200"
-                          onClick={onApplyPromo}>
-                    Apply
-                  </button>
-                )}
-              </div>
-              {promoMsg && <div className="mt-2 text-sm text-neutral-300">{promoMsg}</div>}
-              {promo && (
-                <div className="mt-3 inline-flex items-center gap-2 rounded-md bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300">
-                  <span className="font-semibold">{promo.code}</span>
-                  <span>•</span>
-                  <span>{promo.type === "percent" ? `${promo.value}% off` : `−${fmt.format(promo.value)}`}</span>
-                </div>
-              )}
-            </section>
           </div>
 
           {/* Right column: Order summary */}
@@ -410,15 +537,24 @@ export default function Checkout() {
                   <span className="text-neutral-300">Subtotal</span>
                   <span className="font-medium">{fmt.format(subTotal)}</span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-neutral-300">Discount</span>
-                  <span className="font-medium">{discountAmount ? `−${fmt.format(discountAmount)}` : fmt.format(0)}</span>
-                </div>
+                {discountAmount > 0 && (
+                  <div className="flex items-center justify-between text-emerald-300">
+                    <span>Discount ({promo?.code})</span>
+                    <span className="font-medium">−{fmt.format(discountAmount)}</span>
+                  </div>
+                )}
+                {method === "crypto" && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-neutral-300">Crypto Payment Fee</span>
+                    <span className="font-medium">{fmt.format(Math.round((subTotal - discountAmount) * 0.10 * 100) / 100)}</span>
+                  </div>
+                )}
                 <div className="flex items-center justify-between text-base font-semibold pt-2 border-t border-white/10">
                   <span>Total</span>
-                  <span>{fmt.format(total)}</span>
+                  <span>{fmt.format(total + (method === "crypto" ? Math.round((subTotal - discountAmount) * 0.10 * 100) / 100 : 0))}</span>
                 </div>
               </div>
+
             </div>
           </aside>
         </div>
