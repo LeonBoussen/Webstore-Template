@@ -83,7 +83,7 @@ export default function Account() {
             <label className="mt-3 block text-sm text-neutral-300">Current password</label>
             <input type="password" className="mt-1 w-full rounded bg-neutral-800 border border-white/10 p-2" value={pwd.current_password} onChange={e=>setPwd({...pwd, current_password:e.target.value})}/>
             <label className="mt-3 block text-sm text-neutral-300">New password</label>
-            <input type="password" className="mt-1 w-full rounded bg-neutral-800 border border-white/10 p-2" value={pwd.new_password} onChange={e=>setPwd({...pwd, new_password:e.target.value})}/>
+            <input type="password" className="mt-1 w-full rounded bg-neutral-800 border border-white/10 p-2" value={pwd.new_password} onChange={e=>setPwd({...pwd, new_password:e.target.value})} minLength={8} placeholder="At least 8 characters"/>
             <label className="mt-3 block text-sm text-neutral-300">Confirm new password</label>
             <input type="password" className="mt-1 w-full rounded bg-neutral-800 border border-white/10 p-2" value={pwd.confirm} onChange={e=>setPwd({...pwd, confirm:e.target.value})}/>
             <button className="mt-4 rounded bg-white text-neutral-900 font-semibold px-4 py-2 hover:bg-neutral-200" onClick={changePassword}>Change password</button>

@@ -1,12 +1,42 @@
-# React + Vite
+# Frontend (React + Vite)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This is the React frontend of the **Webstore Template**. See the [root README](../README.md) for the full project overview, setup instructions, and API reference.
 
-Currently, two official plugins are available:
+## Quick start
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+```powershell
+npm install
+npm run dev
+```
 
-## Expanding the ESLint configuration
+The dev server runs at http://localhost:5173 and expects the Flask backend to be running at http://127.0.0.1:5000.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## Scripts
+
+| Command           | Description                     |
+| ----------------- | ------------------------------- |
+| `npm run dev`     | Start the Vite dev server       |
+| `npm run build`   | Production build to `dist/`     |
+| `npm run preview` | Preview the production build    |
+| `npm run lint`    | Run ESLint                      |
+
+## Stack
+
+- **React 19** + **Vite 7**
+- **Tailwind CSS 4** (via `@tailwindcss/vite`) with the typography plugin
+- **React Router 7** for client-side routing
+- **Axios** and native `fetch` for API calls
+- **react-markdown** + **remark-gfm** for Markdown product descriptions
+- **lucide-react** for icons
+
+## Structure
+
+```
+src/
+├── components/   # Navbar
+├── pages/        # One component per route
+├── api/axios.js  # Shared Axios instance (base URL: /api)
+├── App.jsx       # Route definitions
+├── main.jsx      # React entry point
+└── index.css     # Tailwind import + global styles
+```

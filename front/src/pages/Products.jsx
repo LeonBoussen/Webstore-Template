@@ -3,6 +3,7 @@ import { Plus, Minus, Trash2, ShoppingCart, X } from "lucide-react";
 import { Link } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { rehypeSanitize, markdownSchema } from "../lib/markdown";
 
 
 
@@ -146,7 +147,7 @@ const Card = ({ item, kind, onAdd }) => {
         </div>
         {bio && (
           <div className="text-sm text-neutral-300 max-h-12 overflow-hidden prose prose-invert">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{bio}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[[rehypeSanitize, markdownSchema]]}>{bio}</ReactMarkdown>
           </div>
         )}
         <div className="mt-2 flex items-center justify-between">

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { Menu, X, LogIn, LogOut, Shield } from 'lucide-react';
 
 const links = [
@@ -11,27 +11,44 @@ const links = [
 
 export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
-  const [username] = useState('');
-  const [loaded, setLoaded] = useState(false);
-
+  const [me, setMe] = useState(null);
   const [scrolled, setScrolled] = useState(false);
 
-  const navigate = useNavigate();
   const location = useLocation();
 
   const token = typeof window !== 'undefined' ? localStorage.getItem('userToken') : null;
   const isLoggedIn = !!token;
-  const isAdmin = username === 'LeonBoussen';
+  // Admin rights are granted by the account role returned by the API.
+  const isAdmin = me?.role === 'admin';
 
   const isHome = location.pathname === '/';
+  // Highlights the nav item of the current page (detail pages count as "Products").
+  const isActive = (path) => (
+    path === '/' ? location.pathname === '/' : location.pathname === path || location.pathname.startsWith(`${path}/`)
+  );
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 10);
     onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
-    setLoaded(true);
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
+
+  // Fetch the current user's role so the Admin link only shows for admins.
+  useEffect(() => {
+    let alive = true;
+    if (!token) {
+      setMe(null);
+      return () => { alive = false; };
+    }
+    fetch('http://127.0.0.1:5000/api/auth/me', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (alive) setMe(d); })
+      .catch(() => { if (alive) setMe(null); });
+    return () => { alive = false; };
+  }, [token]);
 
   useEffect(() => {
     setIsOpen(false);
@@ -74,7 +91,10 @@ export default function Navbar() {
               <Link
                 key={label}
                 to={path}
-                className="relative after:absolute after:inset-x-0 after:-bottom-1 after:h-[2px] after:w-0 after:bg-cyan-300 after:transition-all hover:after:w-full hover:text-cyan-300 transition">
+                aria-current={isActive(path) ? 'page' : undefined}
+                className={`relative after:absolute after:inset-x-0 after:-bottom-1 after:h-[2px] after:w-0 after:bg-cyan-300 after:transition-all transition hover:after:w-full hover:text-cyan-300 ${
+                  isActive(path) ? 'text-cyan-300 after:w-full' : 'text-white'
+                }`}>
                 {label}
               </Link>
             ))}
@@ -132,7 +152,12 @@ export default function Navbar() {
             <Link
               key={label}
               to={path}
-              className="block w-full py-2 px-3 rounded-lg text-white hover:bg-cyan-600 hover:text-white transition font-medium"
+              aria-current={isActive(path) ? 'page' : undefined}
+              className={`block w-full py-2 px-3 rounded-lg transition font-medium ${
+                isActive(path)
+                  ? 'bg-cyan-600/25 text-cyan-200 hover:bg-cyan-600/40 hover:text-cyan-100'
+                  : 'text-white hover:bg-cyan-600 hover:text-white'
+              }`}
             >
               {label}
             </Link>

@@ -16,6 +16,18 @@ shop.db
 # Virtual environments
 venv/
 env/
+.venv/
+
+# npm cache used by local tooling
+.npm-cache/
+
+# Local python dependency/test folders
+back/.pylibs/
+back/.pip-cache/
+back/.pip-tmp/
+
+# Local security-audit scratch files
+.audit/
 front/vite.config.js
 
 # Uploaded files like images for test database
