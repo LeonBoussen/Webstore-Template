@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { rehypeSanitize, markdownSchema } from "../lib/markdown";
 
 
 
@@ -295,7 +296,7 @@ export default function ProductDetails() {
 
                 {product.bio && (
                   <div className="mt-3 text-sm text-neutral-300 prose prose-invert">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{product.bio}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[[rehypeSanitize, markdownSchema]]}>{product.bio}</ReactMarkdown>
                   </div>
                 )}
 

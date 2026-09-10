@@ -71,9 +71,10 @@ export default function Signup() {
               placeholder="••••••••"
               value={password}
               onChange={e=>setPass(e.target.value)}
-              minLength={6}
+              minLength={8}
               required
             />
+            <p className="mt-1 mb-2 text-xs text-neutral-500">At least 8 characters.</p>
 
             <button
               type="submit"

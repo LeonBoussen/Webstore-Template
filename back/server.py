@@ -7,7 +7,8 @@ try:
     from datetime import datetime
     import colorama
     import random
-    import os, hashlib, hmac, base64, json, time
+    import os, hashlib, hmac, base64, json, time, re
+    import threading
     from functools import wraps
     from werkzeug.utils import secure_filename
     from dotenv import load_dotenv
@@ -32,9 +33,16 @@ except Exception as e:
     exit(1)
 
 try:
+    # Origins allowed to call this API (CORS allow-list). Defaults to the
+    # Vite dev-server origins; override with ALLOWED_ORIGINS in back/.env.
+    ALLOWED_ORIGINS = [
+        o.strip()
+        for o in (os.environ.get("ALLOWED_ORIGINS") or "http://localhost:5173,http://127.0.0.1:5173").split(",")
+        if o.strip()
+    ]
     app = Flask(__name__, static_folder="static")
     app.config["JSON_SORT_KEYS"] = False
-    CORS(app)
+    CORS(app, origins=ALLOWED_ORIGINS)
 except Exception as e:
     print(f"Failed to initialize Flask app: {e}")
     input("Press Enter to exit...")
@@ -42,7 +50,16 @@ except Exception as e:
 
 try:
     SECRET_KEY = os.environ.get("SECRET_KEY")
+    if not SECRET_KEY:
+        raise ValueError(
+            "SECRET_KEY is required. Copy back/.env.example to back/.env "
+            "and set a long random value."
+        )
     ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
+    # Username that is reserved for the shop owner / first admin account.
+    ADMIN_USERNAME = (os.environ.get("ADMIN_USERNAME") or "LeonBoussen").strip()
+    # Keep the hard-coded dev discount codes working only when explicitly enabled.
+    ENABLE_DEV_DISCOUNT_CODES = (os.environ.get("ENABLE_DEV_DISCOUNT_CODES") or "0").strip().lower() in ("1", "true", "yes", "on")
     UPLOAD_DIR = os.path.join(os.getcwd(), "static", "uploads")
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB"))
@@ -66,6 +83,57 @@ except Exception as e:
     print(f"Failed to load configuration: {e}")
     input("Press Enter to exit...")
     exit(1)
+
+@app.after_request
+def add_security_headers(resp):
+    """Minimal hardening headers on every response."""
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    return resp
+
+# ----------------------------
+# Log safety + rate limiting
+# ----------------------------
+
+# Keys whose values must never reach the log file.
+SENSITIVE_KEY_PARTS = ("password", "token", "secret", "authorization", "cookie", "salt", "hash")
+
+def mask_sensitive(obj):
+    """Recursively mask credential-like keys before values are logged."""
+    if isinstance(obj, dict):
+        return {
+            k: ("***" if any(p in k.lower() for p in SENSITIVE_KEY_PARTS) else mask_sensitive(v))
+            for k, v in obj.items()
+        }
+    if isinstance(obj, (list, tuple)):
+        return [mask_sensitive(v) for v in obj]
+    return obj
+
+_rl_lock = threading.Lock()
+_rl_hits: dict = {}
+
+def rate_limit(max_requests: int, window_seconds: int):
+    """Decorator: allow at most `max_requests` requests per window per client IP."""
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            ip = request.remote_addr or "unknown"
+            key = f"{ip}:{fn.__name__}"
+            now = time.time()
+            with _rl_lock:
+                hits = [t for t in _rl_hits.get(key, []) if now - t < window_seconds]
+                if len(hits) >= max_requests:
+                    return jsonify({"error": "Too many requests. Try again later."}), 429
+                hits.append(now)
+                _rl_hits[key] = hits
+                if len(_rl_hits) > 10_000:  # best-effort prune, keep table bounded
+                    for k in [k for k, v in _rl_hits.items()
+                              if not any(now - t < window_seconds for t in v)]:
+                        _rl_hits.pop(k, None)
+            return fn(*args, **kwargs)
+        return wrapper
+    return decorator
 
 def log(message, status="DEFAULT"):
     try:
@@ -113,7 +181,7 @@ def sign_token(payload: dict, exp_seconds: int = 3600):
     raw = json.dumps(body, separators=(",", ":")).encode()
     sig = hmac.new(SECRET_KEY.encode(), raw, hashlib.sha256).digest()
     ret = f"{b64url(raw)}.{b64url(sig)}"
-    log(f"Generated token: {ret}", "SUCCESS")
+    log(f"Generated token (expires {body['exp']})", "SUCCESS")
     return ret
 
 def verify_token(token: str):
@@ -144,14 +212,15 @@ def require_admin(fn):
             return jsonify({"error": "Missing token"}), 401
         token = auth.split(" ", 1)[1].strip()
         body = verify_token(token)
-        if not body or body.get("role") != "user" or not body.get("user_id"):
+        if not body or not body.get("user_id"):
             return jsonify({"error": "Invalid token"}), 403
         conn = db()
         cur = conn.cursor()
-        cur.execute("SELECT username FROM users WHERE id=?", (body["user_id"],))
+        cur.execute("SELECT role FROM users WHERE id=?", (body["user_id"],))
         row = cur.fetchone()
         conn.close()
-        if not row or row[0] != "LeonBoussen":
+        # Admin rights come from the account's role, never from its username.
+        if not row or row[0] != "admin":
             return jsonify({"error": "Admin access denied"}), 403
         request.user_id = body["user_id"]
         return fn(*args, **kwargs)
@@ -165,7 +234,7 @@ def require_user(fn):
             return jsonify({"error": "Missing user token"}), 401
         token = auth.split(" ", 1)[1].strip()
         body = verify_token(token)
-        if not body or body.get("role") != "user":
+        if not body or not body.get("user_id"):
             return jsonify({"error": "Invalid user token"}), 403
         request.user_id = body.get("user_id")
         return fn(*args, **kwargs)
@@ -214,11 +283,11 @@ def hash_password(password: str) -> tuple[str, str]:
         log("hash_password: password is not a string", "ERROR")
         raise TypeError("password must be a string")
     salt = os.urandom(16)
-    log(f"hash_password: generated salt: {_b64e(salt)}", "INFO")
+    log("hash_password: salt generated", "INFO")
     dk = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt, PBKDF2_ITERATIONS)
-    log(f"hash_password: derived key (hash) generated", "INFO")
+    log("hash_password: derived key (hash) generated", "INFO")
     hash_b64, salt_b64 = _b64e(dk), _b64e(salt)
-    log(f"hash_password returning hash_b64: {hash_b64}, salt_b64: {salt_b64}", "SUCCESS")
+    log("hash_password returning (lengths only) hash/salt", "SUCCESS")
     return hash_b64, salt_b64
 
 def verify_password(password: str, stored_hash_b64: str, salt_b64: str) -> bool:
@@ -228,9 +297,9 @@ def verify_password(password: str, stored_hash_b64: str, salt_b64: str) -> bool:
     log(f"verify_password called for password: {'*' * len(password)}", "INFO")
     try:
         salt = _b64d(salt_b64)
-        log(f"verify_password: decoded salt", "INFO")
+        log("verify_password: decoded salt", "INFO")
         dk = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt, PBKDF2_ITERATIONS)
-        log(f"verify_password: derived key (hash) generated", "INFO")
+        log("verify_password: derived key (hash) generated", "INFO")
         calc = _b64e(dk)
         result = hmac.compare_digest(calc, stored_hash_b64)
         log(f"verify_password: comparison result: {result}", "SUCCESS" if result else "WARNING")
@@ -320,12 +389,12 @@ def paypal_api_base() -> str:
     return base
 
 def _http_json(method: str, url: str, headers: dict, data_obj=None):
-    log(f"_http_json called: method={method}, url={url}, headers={headers}, data_obj={data_obj}", "INFO")
+    log(f"_http_json called: method={method}, url={url}, data_obj={mask_sensitive(data_obj)}", "INFO")
     data_bytes = None
     if data_obj is not None:
         data_bytes = json.dumps(data_obj).encode("utf-8")
         headers = {**headers, "Content-Type": "application/json"}
-        log(f"Serialized data_obj to JSON bytes, updated headers: {headers}", "INFO")
+        log("Serialized data_obj to JSON bytes", "INFO")
 
     req = urllib.request.Request(url=url, data=data_bytes, headers=headers, method=method)
     log(f"Created urllib.request.Request: {req}", "INFO")
@@ -366,7 +435,7 @@ def paypal_get_token() -> str:
         raise RuntimeError("PayPal credentials not configured")
 
     auth_str = f"{PAYPAL_CLIENT_ID}:{PAYPAL_CLIENT_SECRET}"
-    log(f"Encoding PayPal credentials for Basic Auth: {auth_str}", "INFO")
+    log("Encoding PayPal client credentials for Basic Auth (values not logged)", "INFO")
     auth = base64.b64encode(auth_str.encode()).decode()
     url = f"{paypal_api_base()}/v1/oauth2/token"
     log(f"PayPal token URL: {url}", "INFO")
@@ -376,7 +445,7 @@ def paypal_get_token() -> str:
         "Authorization": f"Basic {auth}",
         "Content-Type": "application/x-www-form-urlencoded",
     }
-    log(f"PayPal token request headers: {headers}", "INFO")
+    log("PayPal token request headers set (Authorization not logged)", "INFO")
     req = urllib.request.Request(url=url, data=data_bytes, headers=headers, method="POST")
     log(f"Created PayPal token request: {req}", "INFO")
     context = ssl.create_default_context()
@@ -390,7 +459,7 @@ def paypal_get_token() -> str:
             log(f"Decoded PayPal token JSON: {payload_json}", "SUCCESS")
             _PAYPAL_TOKEN = payload_json.get("access_token")
             _PAYPAL_TOKEN_EXP = now + int(payload_json.get("expires_in", 300))
-            log(f"Stored PayPal token: {_PAYPAL_TOKEN}, expires at {_PAYPAL_TOKEN_EXP}", "SUCCESS")
+            log(f"PayPal access token stored, expires in {payload_json.get('expires_in', 300)}s", "SUCCESS")
             return _PAYPAL_TOKEN
     except Exception as e:
         log(f"Failed to obtain PayPal token: {e}", "ERROR")
@@ -420,6 +489,10 @@ def _apply_dev_discount(subtotal: float, code: str | None) -> float:
     log(f"_apply_dev_discount called with subtotal={subtotal}, code={code}", "INFO")
     if not code:
         log("No discount code provided", "INFO")
+        return 0.0
+    # Dev codes are only honored when explicitly enabled via the environment.
+    if not ENABLE_DEV_DISCOUNT_CODES:
+        log(f"Discount code '{code}' ignored: dev discount codes are disabled (set ENABLE_DEV_DISCOUNT_CODES=1 to enable)", "WARNING")
         return 0.0
     c = code.strip().upper()
     log(f"Normalized discount code: {c}", "INFO")
@@ -676,67 +749,105 @@ def services_get():
     log(f"Returning services list: {result}", "SUCCESS")
     return jsonify(result)
 
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+USERNAME_MIN, USERNAME_MAX = 3, 32
+PASSWORD_MIN = 8
+PASSWORD_MAX = 128
+EMAIL_MAX = 254
+ADDRESS_MAX = 2000
+
 @app.route('/api/auth/signup', methods=['POST'])
 def auth_signup():
     log("Received signup request", "INFO")
     data = request.get_json(force=True)
-    log(f"Signup payload: {data}", "INFO")
-    email = data.get("email", "").strip().lower()
-    username = data.get("username", "").strip()
-    password = data.get("password", "")
+    log(f"Signup payload: {mask_sensitive(data)}", "INFO")
+    email = (data.get("email") or "").strip().lower()
+    username = (data.get("username") or "").strip()
+    password = data.get("password") or ""
+
     if not email or not username or not password:
-        log("Signup missing required fields", "WARNING")
-        return jsonify({"error": "email, username, password required"}), 400
+        return jsonify({"error": "email, username and password are required"}), 400
+    if len(password) < PASSWORD_MIN:
+        return jsonify({"error": f"Password must be at least {PASSWORD_MIN} characters"}), 400
+    if len(password) > PASSWORD_MAX:
+        return jsonify({"error": "Password is too long"}), 400
+    if len(username) < USERNAME_MIN or len(username) > USERNAME_MAX:
+        return jsonify({"error": f"Username must be between {USERNAME_MIN} and {USERNAME_MAX} characters"}), 400
+    if not EMAIL_RE.match(email) or len(email) > EMAIL_MAX:
+        return jsonify({"error": "A valid email address is required"}), 400
+
+    # Regular signups always create normal users. Admin accounts are created
+    # through the first-launch setup flow (temporary 'admin'/'admin' account,
+    # then POST /api/auth/setup). While that temporary account exists, its
+    # username is protected so a regular signup cannot impersonate it.
+    conn = db()
+    cur = conn.cursor()
+    if cur.execute(
+        "SELECT 1 FROM users WHERE is_setup_admin=1 AND username=? COLLATE NOCASE LIMIT 1",
+        (username,),
+    ).fetchone():
+        conn.close()
+        log("Blocked signup attempt using the temporary setup admin username", "WARNING")
+        return jsonify({"error": "Account could not be created"}), 409
+
     log("Hashing password for new user", "INFO")
     pwd_hash, salt = hash_password(password)
+    role = "user"
     try:
-        conn = db()
-        cur = conn.cursor()
-        log(f"Inserting new user: email={email}, username={username}", "INFO")
         cur.execute(
-            "INSERT INTO users(email, username, password_hash, salt) VALUES(?,?,?,?)",
-            (email, username, pwd_hash, salt)
+            "INSERT INTO users(email, username, password_hash, salt, role) VALUES(?,?,?,?,?)",
+            (email, username, pwd_hash, salt, role)
         )
         conn.commit()
         user_id = cur.lastrowid
-        log(f"Inserted user with id={user_id}", "SUCCESS")
-        conn.close()
-        log("Closed database connection after signup", "INFO")
+        log(f"Inserted user with id={user_id} role={role}", "SUCCESS")
     except sqlite3.IntegrityError:
-        log(f"Signup failed: email {email} already registered", "WARNING")
-        return jsonify({"error": "email already registered"}), 409
-    token = sign_token({"role": "user", "user_id": user_id}, exp_seconds=60 * 60 * 24 * 7)
+        log("Signup failed: duplicate email", "WARNING")
+        # Generic response: do not reveal whether the email already exists.
+        return jsonify({"error": "Account could not be created"}), 409
+    except Exception as e:
+        log(f"Signup failed unexpectedly: {e}", "ERROR")
+        return jsonify({"error": "Account could not be created"}), 500
+    finally:
+        conn.close()
+
+    token = sign_token({"role": role, "user_id": user_id}, exp_seconds=60 * 60 * 24 * 7)
     log(f"Generated signup token for user_id={user_id}", "SUCCESS")
-    return jsonify({"token": token, "user_id": user_id}), 201
+    return jsonify({"token": token, "user_id": user_id, "role": role}), 201
 
 @app.route('/api/auth/login', methods=['POST'])
+@rate_limit(10, 900)
 def auth_login():
     log("Received login request", "INFO")
     data = request.get_json(force=True)
-    log(f"Login payload: {data}", "INFO")
-    email = data.get("email", "").strip().lower()
-    password = data.get("password", "")
-    if not email or not password:
-        log("Login missing email or password", "WARNING")
-        return jsonify({"error": "email and password required"}), 400
+    log(f"Login payload: {mask_sensitive(data)}", "INFO")
+    identifier = (data.get("identifier") or data.get("email") or "").strip()
+    password = data.get("password") or ""
+    if not identifier or not password:
+        return jsonify({"error": "email/username and password required"}), 400
     conn = db()
     cur = conn.cursor()
-    log(f"Querying user by email: {email}", "INFO")
-    cur.execute("SELECT id, password_hash, salt FROM users WHERE email=?", (email,))
+    # Users may log in with either their email or their username.
+    cur.execute(
+        "SELECT id, password_hash, salt, role, is_setup_admin FROM users"
+        " WHERE lower(email)=lower(?) OR username=? COLLATE NOCASE",
+        (identifier, identifier),
+    )
     row = cur.fetchone()
     conn.close()
-    log("Closed database connection after login query", "INFO")
     if not row:
-        log("Login failed: user not found", "WARNING")
+        # Do the same expensive derivation as a real check so unknown emails
+        # are not distinguishable by response time.
+        hash_password(password)
         return jsonify({"error": "invalid credentials"}), 401
     if not verify_password(password, row[1], row[2]):
-        log("Login failed: invalid password", "WARNING")
         return jsonify({"error": "invalid credentials"}), 401
-    user_id = row[0]
+    user_id, role = row[0], row[3]
+    setup_pending = bool(row[4])
     log(f"Login successful for user_id={user_id}", "SUCCESS")
-    token = sign_token({"role": "user", "user_id": user_id}, exp_seconds=60 * 60 * 24 * 7)
+    token = sign_token({"role": role, "user_id": user_id}, exp_seconds=60 * 60 * 24 * 7)
     log(f"Generated login token for user_id={user_id}", "SUCCESS")
-    return jsonify({"token": token, "user_id": user_id})
+    return jsonify({"token": token, "user_id": user_id, "role": role, "setup_pending": setup_pending})
 
 @app.route('/api/auth/me', methods=['GET'])
 @require_user
@@ -745,15 +856,100 @@ def auth_me():
     conn = db()
     cur = conn.cursor()
     log(f"Querying user profile for user_id={request.user_id}", "INFO")
-    cur.execute("SELECT id, email, username FROM users WHERE id=?", (request.user_id,))
+    cur.execute("SELECT id, email, username, role, is_setup_admin FROM users WHERE id=?", (request.user_id,))
     row = cur.fetchone()
     conn.close()
     log("Closed database connection after /api/auth/me", "INFO")
     if not row:
         log(f"User not found for user_id={request.user_id}", "WARNING")
         return jsonify({"error": "not found"}), 404
-    log(f"Returning user profile: id={row[0]}, email={row[1]}, username={row[2]}", "SUCCESS")
-    return jsonify({"id": row[0], "email": row[1], "username": row[2]})
+    log(f"Returning user profile: id={row[0]}, email={row[1]}, username={row[2]}, role={row[3]}", "SUCCESS")
+    return jsonify({
+        "id": row[0], "email": row[1], "username": row[2],
+        "role": row[3], "setup_pending": bool(row[4]),
+    })
+
+@app.route('/api/auth/setup-status', methods=['GET'])
+def auth_setup_status():
+    """Whether the temporary first-launch admin account still exists."""
+    conn = db()
+    cur = conn.cursor()
+    pending = cur.execute("SELECT 1 FROM users WHERE is_setup_admin=1 LIMIT 1").fetchone() is not None
+    conn.close()
+    return jsonify({"setup_pending": pending})
+
+@app.route('/api/auth/setup', methods=['POST'])
+def auth_setup():
+    """
+    First-launch admin setup. Only callable with a token of the temporary
+    setup admin ('admin'/'admin'). Creates the owner's own admin account and
+    deletes the temporary one in the same transaction, so 'admin'/'admin'
+    stops working immediately.
+    Expects: { email, username, password }
+    Returns: { token, user_id, role: 'admin', setup_pending: false }
+    """
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return jsonify({"error": "Missing token"}), 401
+    token_value = auth.split(" ", 1)[1].strip()
+    body = verify_token(token_value)
+    if not body or not body.get("user_id"):
+        return jsonify({"error": "Invalid token"}), 403
+
+    conn = db()
+    cur = conn.cursor()
+    cur.execute("SELECT id, role, is_setup_admin FROM users WHERE id=?", (body["user_id"],))
+    row = cur.fetchone()
+    conn.close()
+    if not row or row[1] != "admin" or not row[2]:
+        return jsonify({"error": "Setup is not required"}), 403
+    setup_admin_id = row[0]
+
+    data = request.get_json(force=True)
+    log(f"Admin setup payload: {mask_sensitive(data)}", "INFO")
+    email = (data.get("email") or "").strip().lower()
+    username = (data.get("username") or "").strip()
+    password = data.get("password") or ""
+
+    if not email or not username or not password:
+        return jsonify({"error": "email, username and password are required"}), 400
+    if len(password) < PASSWORD_MIN:
+        return jsonify({"error": f"Password must be at least {PASSWORD_MIN} characters"}), 400
+    if len(password) > PASSWORD_MAX:
+        return jsonify({"error": "Password is too long"}), 400
+    if len(username) < USERNAME_MIN or len(username) > USERNAME_MAX:
+        return jsonify({"error": f"Username must be between {USERNAME_MIN} and {USERNAME_MAX} characters"}), 400
+    if not EMAIL_RE.match(email) or len(email) > EMAIL_MAX:
+        return jsonify({"error": "A valid email address is required"}), 400
+
+    log("Hashing password for the new admin account", "INFO")
+    pwd_hash, salt = hash_password(password)
+
+    conn = db()
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO users(email, username, password_hash, salt, role, is_setup_admin)"
+            " VALUES(?,?,?,?,'admin',0)",
+            (email, username, pwd_hash, salt),
+        )
+        new_id = cur.lastrowid
+        # Remove the temporary account: the new one is now the only admin.
+        cur.execute("DELETE FROM users WHERE id=? AND is_setup_admin=1", (setup_admin_id,))
+        conn.commit()
+        log(f"Admin setup complete: created user_id={new_id}, removed temporary admin", "SUCCESS")
+    except sqlite3.IntegrityError:
+        log("Admin setup failed: email already in use", "WARNING")
+        return jsonify({"error": "Email is already in use"}), 409
+    except Exception as e:
+        log(f"Admin setup failed unexpectedly: {e}", "ERROR")
+        return jsonify({"error": "Could not create the admin account, please try again"}), 500
+    finally:
+        conn.close()
+
+    token_value = sign_token({"role": "admin", "user_id": new_id}, exp_seconds=60 * 60 * 24 * 7)
+    return jsonify({"token": token_value, "user_id": new_id, "role": "admin", "setup_pending": False}), 201
 
 @app.route('/api/user/profile', methods=['GET'])
 @require_user
@@ -781,6 +977,15 @@ def user_profile_put():
     address = data.get("address")
     current_password = data.get("current_password")
     new_password = data.get("new_password")
+
+    if email and (not EMAIL_RE.match(email) or len(email) > EMAIL_MAX):
+        return jsonify({"error": "A valid email address is required"}), 400
+    if address is not None and len(address) > ADDRESS_MAX:
+        return jsonify({"error": "Address is too long"}), 400
+    if new_password and len(new_password) < PASSWORD_MIN:
+        return jsonify({"error": f"New password must be at least {PASSWORD_MIN} characters"}), 400
+    if new_password and len(new_password) > PASSWORD_MAX:
+        return jsonify({"error": "New password is too long"}), 400
 
     conn = db()
     cur = conn.cursor()
@@ -853,6 +1058,13 @@ def upload_image():
     if size > MAX_UPLOAD_MB * 1024 * 1024:
         log(f"File too large: {size} bytes (limit: {MAX_UPLOAD_MB}MB)", "WARNING")
         return jsonify({"error": f"file too large (>{MAX_UPLOAD_MB}MB)"}), 413
+
+    # Without Pillow we cannot re-encode the file, which means EXIF/GPS data and
+    # possible polyglot content would be stored verbatim. Refuse unless the
+    # explicit opt-in flag is set.
+    if not PIL_AVAILABLE and not ALLOW_UPLOADS_WITHOUT_EXIF_REMOVED:
+        log("Upload rejected: Pillow is required to sanitize images", "WARNING")
+        return jsonify({"error": "Image processing unavailable on server"}), 503
 
     ts = int(time.time())
     out_name = f"{ts}_{name}"
@@ -1166,6 +1378,7 @@ def uploaded_file(filename):
     return send_from_directory(UPLOAD_DIR, filename)
 
 @app.route('/api/contact', methods=['POST'])
+@rate_limit(5, 3600)
 def contact_submit():
     data = request.get_json(force=True, silent=True) or {}
     name = (data.get("name") or "").strip()
@@ -1174,6 +1387,10 @@ def contact_submit():
 
     if not name or not email or not message:
         return jsonify({"error": "All fields are required"}), 400
+    if len(name) > 100 or len(email) > EMAIL_MAX or len(message) > 5000:
+        return jsonify({"error": "One or more fields are too long"}), 400
+    if not EMAIL_RE.match(email):
+        return jsonify({"error": "A valid email address is required"}), 400
 
     try:
         conn = db()
@@ -1184,21 +1401,23 @@ def contact_submit():
         )
         conn.commit()
         conn.close()
-        return jsonify({"ok": True, "msg": f"Message stored: {name, email, message}"}), 201
+        log(f"Contact message stored from {email}", "SUCCESS")
+        return jsonify({"ok": True, "msg": "Message received — we will get back to you soon."}), 201
     except Exception as e:
-        return jsonify({"error": f"Failed to save message: {e}"}), 500
+        log(f"Failed to store contact message: {e}", "ERROR")
+        return jsonify({"error": "Failed to save message. Please try again later."}), 500
     
 
 if __name__ == '__main__':
     while True:
         try:
             if not os.path.exists(DATABASE):
-                log("No database found → creating a new one...", "INFO")
-                init_db.create_or_update_db_table()
+                log("No database found → creating a new one with demo catalog...", "INFO")
+                init_db.create_or_update_db_table(admin_username=ADMIN_USERNAME, seed_sample_catalog=True)
                 log("Database created and initialized.", "SUCCESS")
             else:
                 log("Database found → checking schema and upgrading if needed...", "INFO")
-                init_db.create_or_update_db_table()
+                init_db.create_or_update_db_table(admin_username=ADMIN_USERNAME)
                 log("Database schema is up to date.", "SUCCESS")
             
             log("server.py has been launched!", "INFO")

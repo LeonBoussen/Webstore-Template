@@ -1,21 +1,36 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { Link, useNavigate  } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+
+const API_BASE = 'http://127.0.0.1:5000';
 
 export default function Login() {
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPass] = useState('');
   const [msg, setMsg] = useState('');
+  const [setupPending, setSetupPending] = useState(false);
   const navigate = useNavigate();
+
+  // On a fresh install a temporary admin/admin account exists and the first
+  // login is redirected to /setup to create the real admin account.
+  useEffect(() => {
+    let alive = true;
+    fetch(`${API_BASE}/api/auth/setup-status`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (alive && d) setSetupPending(d.setup_pending === true); })
+      .catch(() => { /* offline: no hint */ });
+    return () => { alive = false; };
+  }, []);
 
   const submit = async (e) => {
     e.preventDefault();
     setMsg('');
     try {
-      const { data } = await axios.post('http://127.0.0.1:5000/api/auth/login', { email, password });
+      const { data } = await axios.post(`${API_BASE}/api/auth/login`, { identifier, password });
       localStorage.setItem('userToken', data.token);
       setMsg('✅ Logged in!');
-      navigate('/products');
+      // A temporary setup admin must create their own admin account first.
+      navigate(data.setup_pending ? '/setup' : '/products');
     } catch (e) {
       setMsg(e?.response?.data?.error || 'Error');
     }
@@ -35,17 +50,25 @@ export default function Login() {
             </p>
           </div>
 
+          {setupPending && (
+            <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+              🚀 <span className="font-semibold">First launch:</span> log in with the
+              temporary admin account (<span className="font-mono">admin</span> /{' '}
+              <span className="font-mono">admin</span>) to create your own admin account.
+            </div>
+          )}
+
           <form
             onSubmit={submit}
             className="rounded-2xl bg-neutral-900/60 border border-white/10 p-6 shadow-xl backdrop-blur"
           >
-            <label className="block text-sm mb-2">Email</label>
+            <label className="block text-sm mb-2">Email or username</label>
             <input
               className="w-full p-3 mb-4 rounded-lg bg-neutral-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-cyan-500"
-              placeholder="you@example.com"
-              value={email}
-              onChange={e=>setEmail(e.target.value)}
-              type="email"
+              placeholder="you@example.com or yourname"
+              value={identifier}
+              onChange={e=>setIdentifier(e.target.value)}
+              autoComplete="username"
               required
             />
 
@@ -56,6 +79,7 @@ export default function Login() {
               placeholder="••••••••"
               value={password}
               onChange={e=>setPass(e.target.value)}
+              autoComplete="current-password"
               required
             />
 
