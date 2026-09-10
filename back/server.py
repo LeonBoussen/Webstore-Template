@@ -164,7 +164,8 @@ print("Log Fucntion OK\nSwitching to LOG mode")
 def b64url(data: bytes) -> str:
     log("Encoding data to URL-safe base64", "INFO")
     b = base64.urlsafe_b64encode(data).rstrip(b"=").decode()
-    log(f"Encoded data: {b}", "SUCCESS")
+    # Never log the encoded value: this is the token body / signature.
+    log(f"Encoded {len(data)} bytes into {len(b)} base64 characters", "SUCCESS")
     return b
 
 def ub64url(data: str) -> bytes:
@@ -195,7 +196,7 @@ def verify_token(token: str):
         body = json.loads(raw)
         if int(time.time()) > int(body.get("exp", 0)):
             return None
-        log(f"Token verified successfully {body}", "SUCCESS")
+        log(f"Token verified successfully for user_id={body.get('user_id')}", "SUCCESS")
         return body
     except Exception:
         log("Token verification failed", "ERROR")
@@ -263,15 +264,15 @@ def row_to_service(r):
     return result
 
 def _b64e(b: bytes) -> str:
-    log(f"_b64e called with bytes: {b[:20]}... (truncated)", "INFO")
+    # Carries password hashes and salts: log sizes only, never the value.
     encoded = base64.b64encode(b).decode('ascii')
-    log(f"_b64e returning: {encoded}", "SUCCESS")
+    log(f"_b64e: encoded {len(b)} bytes into {len(encoded)} base64 characters", "SUCCESS")
     return encoded
 
 def _b64d(s: str) -> bytes:
-    log(f"_b64d called with string: {s}", "INFO")
+    # Carries the stored salt on every password check: log sizes only.
     decoded = base64.b64decode(s.encode('ascii'))
-    log(f"_b64d returning bytes of length: {len(decoded)}", "SUCCESS")
+    log(f"_b64d: decoded {len(s)} base64 characters into {len(decoded)} bytes", "SUCCESS")
     return decoded
 
 def hash_password(password: str) -> tuple[str, str]:
@@ -404,9 +405,11 @@ def _http_json(method: str, url: str, headers: dict, data_obj=None):
         with urllib.request.urlopen(req, context=context, timeout=30) as resp:
             log(f"HTTP request sent, got response: status={resp.status}, reason={getattr(resp, 'reason', None)}", "SUCCESS")
             payload = resp.read()
-            log(f"Read response payload: {payload[:200]}... (truncated)", "INFO")
+            log(f"Read response payload: {len(payload)} bytes", "INFO")
             result = json.loads(payload.decode("utf-8"))
-            log(f"Decoded JSON response: {result}", "SUCCESS")
+            # Response bodies can carry credentials (e.g. PayPal access tokens)
+            # and customer data, so only the masked shape is logged.
+            log(f"Decoded JSON response: {mask_sensitive(result)}", "SUCCESS")
             return result, resp.getcode()
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="ignore")
@@ -454,9 +457,10 @@ def paypal_get_token() -> str:
         with urllib.request.urlopen(req, context=context, timeout=30) as resp:
             log(f"PayPal token HTTP request sent, got response: status={resp.status}, reason={getattr(resp, 'reason', None)}", "SUCCESS")
             payload = resp.read()
-            log(f"Read PayPal token response payload: {payload[:200]}... (truncated)", "INFO")
+            log(f"Read PayPal token response: {len(payload)} bytes", "INFO")
             payload_json = json.loads(payload.decode("utf-8"))
-            log(f"Decoded PayPal token JSON: {payload_json}", "SUCCESS")
+            # The response body contains the access token itself: log it masked.
+            log(f"Decoded PayPal token JSON: {mask_sensitive(payload_json)}", "SUCCESS")
             _PAYPAL_TOKEN = payload_json.get("access_token")
             _PAYPAL_TOKEN_EXP = now + int(payload_json.get("expires_in", 300))
             log(f"PayPal access token stored, expires in {payload_json.get('expires_in', 300)}s", "SUCCESS")
@@ -757,6 +761,7 @@ EMAIL_MAX = 254
 ADDRESS_MAX = 2000
 
 @app.route('/api/auth/signup', methods=['POST'])
+@rate_limit(10, 900)
 def auth_signup():
     log("Received signup request", "INFO")
     data = request.get_json(force=True)
