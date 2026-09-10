@@ -215,9 +215,10 @@ def create_or_update_db_table(admin_username: str | None = None, seed_sample_cat
     Create/upgrade the schema.
 
     If `admin_username` is given (the value of the ADMIN_USERNAME setting),
-    the oldest account with that username is granted the 'admin' role.
-    This migrates databases created before roles existed, when admin rights
-    were (unsafely) derived from the username alone.
+    the oldest account with that username is granted the 'admin' role. This is
+    a one-time migration for databases created before roles existed, when
+    admin rights were (unsafely) derived from the username alone; it is skipped
+    on databases that already have the `role` column.
 
     If `seed_sample_catalog` is True (only meant for brand-new databases),
     a demo catalog of products and services is inserted so the shop is not
@@ -379,6 +380,10 @@ def create_or_update_db_table(admin_username: str | None = None, seed_sample_cat
                 cursor.execute(f'ALTER TABLE {table} ADD COLUMN {col} {definition}')
 
         # Add missing columns to users
+        # NOTE: read this *before* the backfill adds `role`. A database that
+        # still lacks the column predates roles, which is the only case where
+        # the legacy username-based promotion below may run.
+        users_predate_roles = table_exists(cursor, 'users') and not column_exists(cursor, 'users', 'role')
         users_backfill = [
             ('users', 'role', "TEXT NOT NULL DEFAULT 'user'"),
             ('users', 'is_setup_admin', "INTEGER NOT NULL DEFAULT 0"),
@@ -420,8 +425,15 @@ def create_or_update_db_table(admin_username: str | None = None, seed_sample_cat
             ''')
 
         # Legacy migration: grant 'admin' to the oldest account that uses the
-        # configured admin username (pre-role databases).
-        if admin_username:
+        # configured admin username. This runs EXACTLY ONCE, when the `role`
+        # column is first added to a pre-role database.
+        #
+        # It must never run on a current-schema database: every startup used to
+        # re-run it, so anyone who signed up with the configured username (the
+        # default is ADMIN_USERNAME=LeonBoussen) was silently promoted to admin
+        # on the next restart. On a current-schema database the only bootstrap
+        # is the temporary 'admin'/'admin' account + /api/auth/setup flow.
+        if admin_username and users_predate_roles:
             cursor.execute(
                 """
                 UPDATE users SET role = 'admin'
@@ -431,7 +443,7 @@ def create_or_update_db_table(admin_username: str | None = None, seed_sample_cat
                 (admin_username,),
             )
             if cursor.rowcount:
-                print(f"Promoted '{admin_username}' to admin role.")
+                print(f"Promoted '{admin_username}' to admin role (pre-role database migration).")
 
         # --- Temporary default-admin seeding (first launch) -----------------
         # A brand-new database has no admin at all: seed the well-known

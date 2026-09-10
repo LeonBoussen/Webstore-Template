@@ -26,7 +26,8 @@ The dev server runs at http://localhost:5173 and expects the Flask backend to be
 - **Tailwind CSS 4** (via `@tailwindcss/vite`) with the typography plugin
 - **React Router 7** for client-side routing
 - **Axios** and native `fetch` for API calls
-- **react-markdown** + **remark-gfm** for Markdown product descriptions
+- **react-markdown** + **remark-gfm** for Markdown product descriptions, sanitized with
+  **rehype-sanitize** (schema in `src/lib/markdown.js`)
 - **lucide-react** for icons
 
 ## Structure
@@ -35,8 +36,14 @@ The dev server runs at http://localhost:5173 and expects the Flask backend to be
 src/
 ├── components/   # Navbar
 ├── pages/        # One component per route
-├── api/axios.js  # Shared Axios instance (base URL: /api)
+├── lib/          # markdown.js — hardened rehype-sanitize schema
+├── api/axios.js  # Shared Axios instance (baseURL: /api) — not imported yet
 ├── App.jsx       # Route definitions
 ├── main.jsx      # React entry point
 └── index.css     # Tailwind import + global styles
 ```
+
+> **API base URL:** each page currently declares its own
+> `const API_BASE = 'http://127.0.0.1:5000'` (or creates a local Axios instance) instead of using
+> `src/api/axios.js`, so that file is unused for now. Changing the backend host means editing the
+> pages, not a single config value.
